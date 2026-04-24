@@ -218,7 +218,7 @@ class VariablesSistema(models.Model):
     id_vairables_sistema = models.AutoField(primary_key=True)
     nombre_variable = models.CharField(max_length=100)
     descripcion = models.TextField(null=True, default=None, blank=True)
-    valor = models.CharField(max_length=500)
+    valor = models.TextField()
     url = models.TextField(null=True, default=None, blank=True)
     estado = models.BooleanField(default=True)
 
