@@ -203,7 +203,7 @@ class ProductsAdmin(admin.ModelAdmin):
         )
         return ", ".join(str(result.duracion_dias_alquiler) for result in game_inventory) \
             if game_inventory is not None else None
-    list_per_page = 5
+    list_per_page = 15
     search_fields = ['title',]
     list_filter = ["consola",]
 
