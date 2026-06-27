@@ -183,7 +183,18 @@ def token_pass(request, self=None):
         subject_email = settings.SUBJECT_EMAIL_FOR_TOKEN
         text_email = settings.EMAIL_FOR_TOKEN
         if exist_user:
-            token = str(uuid.uuid4())[0:5]
+            token = str(uuid.uuid4())[0:6]
+            token_key = f"password_reset_token:{token}"
+            user_key = f"password_reset_user:{username}"
+
+            old_token = cache.get(user_key)
+            if old_token:
+                cache.delete(f"password_reset_token:{old_token}")
+
+            timeout_seconds = 60
+            cache.set(token_key, username, timeout=timeout_seconds)
+            cache.set(user_key, token, timeout=timeout_seconds)
+
             text_email += "<center><b>" + token + "</b><center>"
             SendEmail.__int__(self, text_email, subject_email, username)
             return HttpResponse(
