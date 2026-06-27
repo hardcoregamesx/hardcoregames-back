@@ -196,6 +196,8 @@ def token_pass(request, self=None):
             cache.set(user_key, token, timeout=timeout_seconds)
 
             text_email += "<center><b>" + token + "</b><center>"
+            print(f"Token: {token}, Username: {username}")
+            print(f"Token key: {cache.get(token_key)}, User key: {user_key}")
             SendEmail.__int__(self, text_email, subject_email, username)
             return HttpResponse(
                 JsonResponse({'token': token, "status": 200, "code": "00"}),
@@ -269,8 +271,9 @@ def validate_email_token(request, self=None):
         body = GetJsonFromRequest.__int__(self, request)
         username = body["username"]
         token = body["token"]
+        token_reason = body.get("reason", "email_validation_token")  # Default reason if not provided
 
-        token_key = f"email_validation_token:{token}"
+        token_key = f"{token_reason}:{token}"
         user_from_cache = cache.get(token_key)
 
         if user_from_cache is None or user_from_cache != username:
