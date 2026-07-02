@@ -16,7 +16,7 @@ def read_file_ps(sheetPs, id_primaria, id_secundaria):
 
     sheet = sheetPs
     m_row = sheet.max_row
-    batch_size = 4
+    batch_size = 6
 
     for start in range(2, m_row + 1, batch_size):
         end = min(start + batch_size, m_row + 1)
