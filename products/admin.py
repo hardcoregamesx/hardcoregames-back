@@ -1,6 +1,7 @@
 import glob
 import os
 from datetime import date, timedelta
+import threading
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
@@ -325,10 +326,14 @@ class FilesAdmin(admin.ModelAdmin):
         for filename in glob.glob(settings.STATIC_URL_FILES + '*.xlsx'):
             os.remove(filename)
         Files.objects.all().delete()
-        super(FilesAdmin, self).save_model(request, obj, form, change)
-        ManegePricesFile()
+        super().save_model(request, obj, form, change)
 
+        threading.Thread(target=ManegePricesFile, daemon=True).start()
 
+        self.message_user(
+            request,
+            "El archivo fue subido. El procesamiento se está ejecutando en segundo plano."
+        )
 class SystemVariablesAdmin(admin.ModelAdmin):
     list_display = ['nombre_variable', 'descripcion', 'valor', 'url', 'estado']
 
