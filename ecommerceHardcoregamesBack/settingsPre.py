@@ -22,10 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8cn@ply1603#h-4o9bvjbuehv186x7=wg0xqm)q6$s#h_*97xi'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-8cn@ply1603#h-4o9bvjbuehv186x7=wg0xqm)q6$s#h_*97xi')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = ["*"]
 
@@ -136,11 +136,11 @@ WSGI_APPLICATION = 'ecommerceHardcoregamesBack.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'hardcoregames_ueh3',
-        'USER': 'hardcoregames_ueh3_user',
-        'PASSWORD': 'Ezihj89hXDqDv0WHpROBO9dD3o2CGhNt',
-        'HOST': 'dpg-cmct4pv109ks739390dg-a.oregon-postgres.render.com',
-        'DATABASE_PORT': '5432',
+        'NAME': os.environ.get('DB_NAME', 'hardcoregames_ueh3'),
+        'USER': os.environ.get('DB_USER', 'hardcoregames_ueh3_user'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'Ezihj89hXDqDv0WHpROBO9dD3o2CGhNt'),
+        'HOST': os.environ.get('DB_HOST', 'dpg-cmct4pv109ks739390dg-a.oregon-postgres.render.com'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
 
@@ -190,11 +190,11 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-SEND_EMAIL=os.getenv("SEND_EMAIL")
+SEND_EMAIL = os.environ.get('SEND_EMAIL', '')
 # FROM_EMAIL="ventas@hardcoregames.co"
-FROM_EMAIL="jhoan0498@gmail.com"
+FROM_EMAIL = os.environ.get('FROM_EMAIL', 'jhoan0498@gmail.com')
 # PASS_SMTP="udeu fewe jbof sckp "
-PASS_SMTP="bbcg cluw zlia hhui "
+PASS_SMTP = os.environ.get('PASS_SMTP', '')
 SUBJECT_EMAIL_FOR_TOKEN = "Código para cambio de contraseña HardCoreGames"
 SUBJECT_EMAIL_FOR_SALE = "Confirmación de compra en HardCoreGames"
 EMAIL_FOR_TOKEN = "<html>" \
