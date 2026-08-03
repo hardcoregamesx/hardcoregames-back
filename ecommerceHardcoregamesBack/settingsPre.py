@@ -67,6 +67,37 @@ INSTALLED_APPS = [
     'products',
 ]
 
+JAZZMIN_SETTINGS = {
+        "site_title": "HardcoreGames Admin",
+        "site_header": "HardcoreGames",
+        "site_brand": "HardcoreGames",
+        "welcome_sign": "Bienvenido al panel de administracion",
+        "copyright": "HardcoreGames",
+    "topmenu_links": [
+        {"name": "Inicio", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Ver Sitio", "url": "https://www.hardcoregames.co", "new_window": True},
+    ],
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "auth.user": "fas fa-user",
+        "auth.Group": "fas fa-users",
+        "products.Products": "fas fa-gamepad",
+        "products.ProductAccounts": "fas fa-key",
+        "products.SaleDetail": "fas fa-shopping-cart",
+        "products.Consoles": "fas fa-tv",
+        "products.TypeGames": "fas fa-tags",
+        "products.VariablesSistema": "fas fa-cogs",
+        "products.Licenses": "fas fa-certificate",
+    },
+    "default_icon_parents": "fas fa-chevron-circle-right",
+    "default_icon_children": "fas fa-circle",
+    "related_modal_active": False,
+    "use_google_fonts_cdn": True,
+    "show_ui_builder": False,
+    "changeform_format": "horizontal_tabs",
+}
 MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
