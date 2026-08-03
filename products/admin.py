@@ -495,6 +495,16 @@ class HasAccountFilter(SimpleListFilter):
         return queryset
 
 
+@admin.action(description='Marcar como vendido (stock = 0)')
+def marcar_vendido_inventario(modeladmin, request, queryset):
+    updated = queryset.update(stock=0)
+    modeladmin.message_user(
+        request,
+        f'{updated} ítem(s) marcado(s) como vendido — stock puesto en 0.',
+        messages.SUCCESS,
+    )
+
+
 @admin.register(GameDetailInventario)
 class GameDetailInventarioAdmin(admin.ModelAdmin):
 
@@ -517,10 +527,7 @@ class GameDetailInventarioAdmin(admin.ModelAdmin):
 
     @admin.display(description='Licencia', ordering='licencia__descripcion')
     def col_licencia(self, obj):
-        if obj.licencia:
-            url = reverse('admin:products_gamedetail_change', args=[obj.id_game_detail])
-            return format_html('<a href="{}">{}</a>', url, obj.licencia)
-        return '—'
+        return str(obj.licencia) if obj.licencia else '—'
 
     @admin.display(description='Consola', ordering='consola__descripcion')
     def col_consola(self, obj):
@@ -537,30 +544,41 @@ class GameDetailInventarioAdmin(admin.ModelAdmin):
     def col_account_password(self, obj):
         return obj.cuenta.password if obj.cuenta and obj.cuenta.password else '—'
 
-    @admin.display(description='Stock', ordering='stock')
-    def col_stock(self, obj):
-        color = '#2e7d32' if obj.stock > 0 else '#c62828'
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>',
-            color, obj.stock,
-        )
-
     list_display = (
         'col_producto',
         'col_licencia',
         'col_consola',
         'col_account_name',
         'col_account_password',
-        'col_stock',
+        'stock',
     )
+    list_editable = ('stock',)
     list_filter = ('licencia', 'consola', HasAccountFilter)
     search_fields = (
         'producto__title',
         'cuenta__cuenta',
     )
     list_per_page = 25
+    actions = [marcar_vendido_inventario]
 
-    # read-only — no add / delete from this view
+    # ---- change form: only stock is editable, rest are informational ----
+    readonly_fields = (
+        'col_producto', 'col_licencia', 'col_consola',
+        'col_account_name', 'col_account_password',
+    )
+    fieldsets = (
+        ('Información del ítem', {
+            'fields': ('col_producto', 'col_licencia', 'col_consola'),
+        }),
+        ('Cuenta asociada', {
+            'fields': ('col_account_name', 'col_account_password'),
+        }),
+        ('Stock', {
+            'fields': ('stock',),
+            'description': 'Modifica el stock manualmente. Ponlo en 0 para quitarlo de la venta.',
+        }),
+    )
+
     def has_add_permission(self, request):
         return False
 
@@ -568,7 +586,7 @@ class GameDetailInventarioAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        return False
+        return True  # allow editing stock
 
 
 # ------------------------------------------------------------------ #
