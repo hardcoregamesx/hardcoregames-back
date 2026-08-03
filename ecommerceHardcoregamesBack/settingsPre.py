@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-8cn@ply1603#h-4o9bvjbuehv186x7=wg0xqm)q6$s#h_*97xi')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
@@ -138,7 +138,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
         'NAME': os.environ.get('DB_NAME', 'hardcoregames_ueh3'),
         'USER': os.environ.get('DB_USER', 'hardcoregames_ueh3_user'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'Ezihj89hXDqDv0WHpROBO9dD3o2CGhNt'),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
         'HOST': os.environ.get('DB_HOST', 'dpg-cmct4pv109ks739390dg-a.oregon-postgres.render.com'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
