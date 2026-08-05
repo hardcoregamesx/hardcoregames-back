@@ -27,7 +27,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '*').split(',')]
 
 # CORS_ALLOWED_ORIGINS = {
 #  'http://localhost:4200',
@@ -45,7 +45,7 @@ CORS_ALLOW_METHODS = (
     "POST",
     "PUT",
 )
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'True') == 'True'
 CORS_ALLOW_CREDENTIALS = True
 CORS_ORIGIN_WHITELIST = (
     'http://localhost',
@@ -139,7 +139,7 @@ DATABASES = {
         'NAME': os.environ.get('DB_NAME', 'hardcoregames_ueh3'),
         'USER': os.environ.get('DB_USER', 'hardcoregames_ueh3_user'),
         'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': os.environ.get('DB_HOST', 'dpg-cmct4pv109ks739390dg-a.oregon-postgres.render.com'),
+        'HOST': os.environ.get('DB_HOST', 'hc-postgres'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
@@ -235,7 +235,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '*').split(',')]
 
 # CORS_ALLOWED_ORIGINS = {
 #  'http://localhost:4200',
@@ -253,7 +253,7 @@ CORS_ALLOW_METHODS = (
     "POST",
     "PUT",
 )
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'True') == 'True'
 CORS_ALLOW_CREDENTIALS = True
 CORS_ORIGIN_WHITELIST = (
     'http://localhost',
@@ -347,7 +347,7 @@ DATABASES = {
         'NAME': os.environ.get('DB_NAME', 'hardcoregames_ueh3'),
         'USER': os.environ.get('DB_USER', 'hardcoregames_ueh3_user'),
         'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': os.environ.get('DB_HOST', 'dpg-cmct4pv109ks739390dg-a.oregon-postgres.render.com'),
+        'HOST': os.environ.get('DB_HOST', 'hc-postgres'),
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
