@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-8cn@ply1603#h-4o9bvjbuehv186x7=wg0xqm)q6$s#h_*97xi
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["admin.hardcoregames.co","admin.srv936408.hstgr.cloud","hc-django","localhost","127.0.0.1"]
 
 
 # Application definition
@@ -45,6 +45,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -88,7 +89,7 @@ CORS_ALLOW_CREDENTIALS = True
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -96,6 +97,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'products.context_processors.admin_kpis',
             ],
         },
     },
@@ -113,7 +115,7 @@ DATABASES = {
         'NAME': 'hardcoregames',
         'USER': 'postgres',
         'PASSWORD': '#1998jhoan',
-        'HOST': 'localhost',
+        'HOST': 'hc-postgres',
         'DATABASE_PORT': '5432',
     }
 }
@@ -153,7 +155,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
+STATIC_ROOT = '/app/static'
 STATIC_URL = 'static/'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 STATIC_URL_FILES = 'static/files/'
 
@@ -178,7 +182,7 @@ FROM_EMAIL=os.getenv("FROM_EMAIL")
 PASS_SMTP=os.getenv("PASS_SMTP")
 
 SUBJECT_EMAIL_FOR_TOKEN = "Código para cambio de contraseña HardCoreGames"
-SUBJECT_EMAIL_FOR_SALE = "Confirmación de compra en HardCoreGames"
+SUBJECT_EMAIL_FOR_SALE = "Pedido digital en Hardcore Games"
 SUBJECT_EMAIL_FOR_CONFIRMATION = "Confirmación de email en HardCoreGames"
 INFO_TEXT = os.getenv("INFO_TEXT")
 #INFO_TEXT = "INFO_TEXT"

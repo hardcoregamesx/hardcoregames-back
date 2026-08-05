@@ -1,0 +1,588 @@
+/*
+ * Hardcore Games — tema de marca para el admin de Django.
+ * Direccion de arte v3: dashboard SaaS claro (referencia: paneles tipo
+ * Staradmin) en vez de un admin oscuro repintado. Sidebar solido en el
+ * indigo de marca, contenido en blanco/gris muy claro, tarjetas KPI reales
+ * arriba del dashboard, acentos en celeste y dorado del logo.
+ * Se carga DESPUES de base.css — no se toca ningun otro archivo del admin.
+ */
+
+:root, html[data-theme="light"], html[data-theme="dark"] {
+    --primary: #4b3aa0;
+    --primary-fg: #ffffff;
+
+    --body-fg: #2b2a3a;
+    --body-bg: #f1f2f9;
+    --body-quiet-color: #7a7890;
+    --body-loud-color: #17162a;
+
+    --header-color: #17162a;
+    --header-branding-color: #ffffff;
+    --header-bg: #ffffff;
+    --header-link-color: #4b3aa0;
+
+    --breadcrumbs-fg: #7a7890;
+    --breadcrumbs-link-fg: #4b3aa0;
+    --breadcrumbs-bg: #ffffff;
+
+    --link-fg: #4b3aa0;
+    --link-hover-color: #6a4bd6;
+    --link-selected-fg: #a9760f;
+
+    --hairline-color: #e6e5f2;
+    --border-color: #e6e5f2;
+
+    --button-fg: #ffffff;
+    --button-bg: #4b3aa0;
+    --button-hover-bg: #3c2f83;
+    --default-button-bg: #3bc5f0;
+    --default-button-hover-bg: #2ba9d1;
+    --close-button-bg: #e6e5f2;
+    --close-button-hover-bg: #d7d5ea;
+    --delete-button-bg: #e5386c;
+    --delete-button-hover-bg: #c22557;
+
+    --object-tools-fg: #241a02;
+    --object-tools-bg: #d9a91b;
+    --object-tools-hover-bg: #c4970f;
+
+    --darkened-bg: #f7f7fc;
+    --selected-bg: #eef0fb;
+    --selected-row: #fbf6e3;
+
+    --hc-cyan: #2fb8e6;
+    --hc-gold: #d9a91b;
+    --hc-gold-dim: #a9760f;
+    --hc-indigo: #4b3aa0;
+    --hc-indigo-dark: #352a70;
+    --hc-sidebar-bg: #4534a3;
+    --hc-sidebar-bg-2: #3a2b8f;
+    --hc-card-bg: #ffffff;
+    --hc-card-border: #eceafa;
+
+    --font-family-primary: 'Sora', -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-family-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+* { font-family: var(--font-family-primary); }
+
+html, body { background: var(--body-bg); }
+
+body { color: var(--body-fg); }
+
+/* ------------------------------------------------------------------ */
+/* Header — barra superior blanca, tipo topbar de SaaS                  */
+/* ------------------------------------------------------------------ */
+#header {
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--hairline-color);
+    color: var(--header-color);
+    box-shadow: 0 1px 0 rgba(23,22,42,0.02);
+}
+
+#branding h1, #branding h1 a:link, #branding h1 a:visited {
+    font-weight: 800;
+    letter-spacing: .3px;
+    font-size: 19px;
+    color: var(--hc-indigo);
+}
+
+#user-tools {
+    font-size: 12.5px;
+    color: var(--body-quiet-color);
+}
+#user-tools a {
+    color: var(--hc-indigo);
+    font-weight: 600;
+}
+
+div.breadcrumbs {
+    background: var(--body-bg);
+    color: var(--breadcrumbs-fg);
+    border-bottom: none;
+    font-size: 12px;
+    padding: 14px 24px 4px;
+}
+
+div.breadcrumbs a { color: var(--breadcrumbs-link-fg); }
+
+/* ------------------------------------------------------------------ */
+/* Sidebar — panel solido en indigo, estilo Staradmin                   */
+/* ------------------------------------------------------------------ */
+#nav-sidebar {
+    background: linear-gradient(180deg, var(--hc-sidebar-bg), var(--hc-sidebar-bg-2));
+    border-right: none;
+    padding-top: 8px;
+}
+
+#nav-sidebar .module { background: transparent; border: none; box-shadow: none; }
+
+#nav-sidebar caption, #nav-sidebar .section {
+    background: transparent !important;
+    color: rgba(255,255,255,0.55);
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: .8px;
+    font-weight: 700;
+    padding: 16px 20px 8px;
+}
+
+#nav-sidebar .current-app .section:link,
+#nav-sidebar .current-app .section:visited {
+    color: #ffffff;
+}
+
+#nav-sidebar table, #nav-sidebar tbody { display: block; width: 100%; border-collapse: collapse; }
+
+#nav-sidebar a {
+    color: rgba(255,255,255,0.88);
+    font-weight: 600;
+    font-size: 13.5px;
+    text-decoration: none;
+}
+
+/* Cada fila de modelo se convierte en un boton/pill real: icono + label a
+   la izquierda, accion "Añadir" como chip aparte a la derecha. Antes esto
+   era una fila de tabla plana con texto de color — ahora es un componente
+   con su propio fondo, borde, hover y estado activo. */
+#nav-sidebar tr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 3px 12px;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent !important;
+    transition: background .15s ease, transform .1s ease;
+}
+
+#nav-sidebar tr:hover {
+    background: rgba(255,255,255,0.08) !important;
+}
+
+#nav-sidebar tr th, #nav-sidebar tr td {
+    border: none;
+    padding: 0;
+    background: transparent !important;
+}
+
+#nav-sidebar tr th {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#nav-sidebar tr th a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px 9px 12px;
+    border-radius: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Icono tipo "O" antes de cada item, igual al patron del dashboard de
+   referencia (bullet circular en vez de texto plano). */
+#nav-sidebar tr th a::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border: 2px solid rgba(255,255,255,0.45);
+    border-radius: 50%;
+    transition: border-color .15s ease, background .15s ease;
+}
+
+/* Flechita decorativa a la derecha del label, como el "→" del dashboard
+   de referencia — puramente visual, no implica que el item sea expandible. */
+#nav-sidebar tr th a::after {
+    content: "\2192";
+    margin-left: auto;
+    padding-left: 8px;
+    color: rgba(255,255,255,0.35);
+    font-size: 12px;
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: opacity .15s ease, transform .15s ease;
+}
+
+#nav-sidebar tr:hover th a::after {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+#nav-sidebar tr td {
+    flex: 0 0 auto;
+}
+
+#nav-sidebar tr td a.addlink {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    font-size: 0;
+    color: transparent;
+    transition: background .15s ease, border-color .15s ease;
+}
+
+#nav-sidebar tr td a.addlink::before {
+    content: "+";
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.75);
+}
+
+#nav-sidebar tr td a.addlink:hover {
+    background: rgba(255,255,255,0.16);
+    border-color: rgba(255,255,255,0.3);
+}
+
+/* Item activo: pill solida en vez de texto resaltado suelto */
+#nav-sidebar .current-model {
+    background: rgba(255,255,255,0.95) !important;
+    border-radius: 10px;
+}
+
+#nav-sidebar .current-model th a {
+    color: var(--hc-indigo);
+    font-weight: 700;
+}
+
+#nav-sidebar .current-model th a::before {
+    border-color: var(--hc-cyan);
+    background: var(--hc-cyan);
+}
+
+#nav-sidebar .current-model th a::after {
+    color: var(--hc-indigo);
+    opacity: 1;
+    transform: none;
+}
+
+#nav-sidebar a:hover {
+    color: #ffffff;
+}
+
+/* Encabezado decorativo del sidebar, estilo "Main Menu" del dashboard de
+   referencia. Es texto puro via CSS (no puede leer al usuario logueado sin
+   duplicar la plantilla del sidebar), asi que se mantiene generico. */
+#nav-sidebar::before {
+    content: "MENÚ PRINCIPAL";
+    display: block;
+    margin: 4px 16px 14px;
+    padding: 16px 4px 10px;
+    color: rgba(255,255,255,0.5);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+
+/* ------------------------------------------------------------------ */
+/* KPIs del dashboard — tarjetas grandes con el numero real             */
+/* ------------------------------------------------------------------ */
+.hc-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    margin-bottom: 24px;
+}
+
+.hc-kpi-card {
+    background: var(--hc-card-bg);
+    border: 1px solid var(--hc-card-border);
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: 0 12px 28px -18px rgba(75,58,160,0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+.hc-kpi-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--hc-cyan), var(--hc-indigo));
+}
+
+.hc-kpi-card:nth-child(2)::before { background: linear-gradient(90deg, var(--hc-gold), var(--hc-cyan)); }
+.hc-kpi-card:nth-child(3)::before { background: linear-gradient(90deg, var(--hc-indigo), var(--hc-gold)); }
+.hc-kpi-card:nth-child(4)::before { background: linear-gradient(90deg, var(--hc-cyan), var(--hc-gold)); }
+
+.hc-kpi-label {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-weight: 700;
+    color: var(--body-quiet-color);
+}
+
+.hc-kpi-value {
+    font-family: var(--font-family-mono);
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--hc-indigo);
+    line-height: 1.15;
+}
+
+.hc-kpi-caption {
+    font-size: 11.5px;
+    color: var(--body-quiet-color);
+}
+
+/* ------------------------------------------------------------------ */
+/* Modulos / tarjetas                                                   */
+/* ------------------------------------------------------------------ */
+.module, .dashboard #content-main > div, .inline-group {
+    background: var(--hc-card-bg);
+    border: 1px solid var(--hc-card-border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 12px 26px -20px rgba(23,22,42,0.18);
+}
+
+.dashboard .module { margin-bottom: 20px; }
+
+.module h2, .module caption, .inline-group h2 {
+    background: var(--darkened-bg);
+    color: var(--hc-indigo);
+    text-transform: uppercase;
+    font-size: 11.5px;
+    letter-spacing: .6px;
+    font-weight: 700;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--hairline-color);
+}
+
+.module ul li, .module table td, .module table th {
+    border-bottom: 1px solid var(--hairline-color);
+}
+
+/* Acciones "Añadir / Modificar / Vista" del listado de apps del dashboard:
+   antes eran texto de color suelto, ahora son chips con su propio fondo,
+   borde e icono — para que se sientan controles, no una lista de enlaces. */
+#content-main .module table td a.addlink,
+#content-main .module table td a.changelink,
+#content-main .module table td a.viewlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: transform .12s ease, box-shadow .12s ease;
+}
+
+#content-main .module table th a {
+    font-weight: 600;
+    color: var(--body-loud-color) !important;
+}
+
+#content-main .module table th a:hover { color: var(--hc-indigo) !important; }
+
+.addlink {
+    color: #0d7a4a !important;
+    background: rgba(28,170,107,0.12);
+    border: 1px solid rgba(28,170,107,0.25);
+}
+.addlink:hover { box-shadow: 0 4px 12px -4px rgba(28,170,107,0.4); transform: translateY(-1px); }
+
+.changelink, .viewlink {
+    color: #1878a6 !important;
+    background: rgba(47,184,230,0.12);
+    border: 1px solid rgba(47,184,230,0.25);
+}
+.changelink:hover, .viewlink:hover { box-shadow: 0 4px 12px -4px rgba(47,184,230,0.4); transform: translateY(-1px); }
+
+#nav-sidebar .module { margin-bottom: 8px; }
+
+/* ------------------------------------------------------------------ */
+/* Botones                                                               */
+/* ------------------------------------------------------------------ */
+.button, input[type=submit], input[type=button], .submit-row input, a.button {
+    background: var(--button-bg);
+    color: var(--button-fg);
+    border-radius: 9px;
+    font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: .2px;
+    border: none;
+    box-shadow: 0 6px 16px -6px rgba(75,58,160,0.45);
+    transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+
+.button:hover, input[type=submit]:hover, input[type=button]:hover {
+    background: var(--button-hover-bg);
+    box-shadow: 0 8px 20px -6px rgba(75,58,160,0.55);
+    transform: translateY(-1px);
+}
+
+.button.default, input[type=submit].default {
+    background: var(--hc-cyan);
+    color: #08202b;
+    box-shadow: 0 6px 16px -6px rgba(47,184,230,0.5);
+}
+
+.button.default:hover { background: var(--default-button-hover-bg); }
+
+.deletelink, a.deletelink {
+    background: var(--delete-button-bg) !important;
+    box-shadow: 0 6px 16px -6px rgba(229,56,108,0.45) !important;
+}
+
+/* Alta especificidad a proposito: base.css define .object-tools a:link con
+   (clase+pseudo-clase+elemento) y nuestro chip .addlink usa !important en
+   el color — sin igualar eso aca, el boton "Añadir" del listado se queda
+   con el fondo/texto equivocados. */
+.object-tools a.addlink,
+.object-tools a:link,
+.object-tools a:visited {
+    background: var(--hc-gold) !important;
+    color: #241a02 !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    padding: 8px 18px !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    font-size: 12.5px !important;
+    background-image: none !important;
+    box-shadow: 0 4px 14px -5px rgba(217,169,27,0.55);
+    transition: background .15s ease, transform .12s ease;
+}
+
+.object-tools a:hover {
+    background: var(--hc-gold-dim) !important;
+    transform: translateY(-1px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Enlaces                                                               */
+/* ------------------------------------------------------------------ */
+a:link, a:visited { color: var(--link-fg); }
+a:focus, a:hover { color: var(--link-hover-color); }
+
+.selector-chosen h2, .selector-available h2 {
+    background: var(--darkened-bg);
+    color: var(--hc-indigo);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tablas de listado                                                    */
+/* ------------------------------------------------------------------ */
+table thead th {
+    background: var(--darkened-bg);
+    color: var(--body-quiet-color);
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: .5px;
+    font-weight: 700;
+}
+
+.row1 { background: #ffffff; }
+.row2 { background: #fbfbff; }
+
+#changelist table td, #changelist table th { font-size: 13px; }
+
+#changelist table td.field-stock,
+#changelist table td.field-stock_total,
+#changelist table td.field-precio,
+#changelist table td.field-dias_duracion {
+    font-family: var(--font-family-mono);
+    font-weight: 600;
+}
+
+tr:hover { background: var(--selected-bg) !important; }
+
+#changelist-filter {
+    background: var(--hc-card-bg);
+    border: 1px solid var(--hc-card-border);
+    border-radius: 14px;
+    box-shadow: 0 12px 26px -20px rgba(23,22,42,0.18);
+}
+
+#changelist-filter h2 {
+    background: transparent;
+    color: var(--hc-indigo);
+}
+
+#changelist-filter li.selected a { color: var(--hc-gold-dim); font-weight: 700; }
+
+.paginator {
+    background: transparent;
+    border-top: 1px solid var(--hairline-color);
+}
+
+.paginator .this-page {
+    background: var(--hc-indigo);
+    color: #fff;
+    border-radius: 7px;
+    font-weight: 700;
+}
+
+/* Inputs */
+input[type=number], input[type=text], input[type=email], input[type=password], textarea, select {
+    background: #ffffff;
+    border: 1px solid var(--hairline-color);
+    border-radius: 8px;
+    color: var(--body-loud-color);
+    font-family: var(--font-family-mono);
+    transition: border-color .12s ease, box-shadow .12s ease;
+}
+
+input[type=number]:focus, input[type=text]:focus, textarea:focus, select:focus {
+    border-color: var(--hc-cyan);
+    box-shadow: 0 0 0 3px rgba(47,184,230,0.18);
+    outline: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Login                                                                 */
+/* ------------------------------------------------------------------ */
+body.login {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        radial-gradient(900px 650px at 12% 8%, rgba(47,184,230,0.14), transparent 60%),
+        radial-gradient(900px 650px at 88% 92%, rgba(75,58,160,0.16), transparent 60%),
+        var(--body-bg);
+}
+
+.login #container {
+    width: auto;
+    min-width: 400px;
+    background: var(--hc-card-bg);
+    border: 1px solid var(--hc-card-border);
+    border-radius: 18px;
+    box-shadow: 0 30px 60px -24px rgba(23,22,42,0.35);
+}
+
+.login #header {
+    box-shadow: none;
+    border-bottom: 1px solid var(--hairline-color);
+}
+
+.login .form-row label { color: var(--body-quiet-color); }
+
+.login .submit-row input { width: 100%; }
+
+/* ------------------------------------------------------------------ */
+/* Badges de estado                                                     */
+/* ------------------------------------------------------------------ */
+.hc-badge-ok { color: #1caa6b; font-weight: 700; }
+.hc-badge-bad { color: #e5386c; font-weight: 700; }

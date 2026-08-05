@@ -338,12 +338,54 @@ class SystemVariablesAdmin(admin.ModelAdmin):
     list_display = ['nombre_variable', 'descripcion', 'valor', 'url', 'estado']
 
 
+class GameDetailStockInline(admin.TabularInline):
+    """
+    Muestra, dentro de cada cuenta, todas sus combinaciones de
+    producto/licencia/consola con el stock editable en línea — para no
+    tener que ir a la base de datos a averiguar qué cuenta tiene stock
+    disponible antes de una venta manual.
+    """
+    model = GameDetail
+    fk_name = 'cuenta'
+    extra = 0
+    can_delete = False
+    fields = ('col_producto', 'col_licencia', 'col_consola', 'precio', 'stock')
+    readonly_fields = ('col_producto', 'col_licencia', 'col_consola', 'precio')
+    verbose_name = 'combinación de stock'
+    verbose_name_plural = 'Stock por combinación (producto / licencia / consola)'
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description='Producto')
+    def col_producto(self, obj):
+        return obj.producto.title if obj.producto else '—'
+
+    @admin.display(description='Licencia')
+    def col_licencia(self, obj):
+        return str(obj.licencia) if obj.licencia else '—'
+
+    @admin.display(description='Consola')
+    def col_consola(self, obj):
+        return obj.consola or '—'
+
+
 class ProductAccountsAdmin(admin.ModelAdmin):
-    list_display = ['cuenta', 'password', 'activa', 'tipo_cuenta', 'dias_duracion', 'codigo_seguridad', ]
+    list_display = ['cuenta', 'password', 'activa', 'tipo_cuenta', 'dias_duracion', 'codigo_seguridad', 'stock_total']
     form = AccountProductForm
     search_fields = ['cuenta',]
     list_filter = ["tipo_cuenta",]
     list_per_page = 10
+    inlines = [GameDetailStockInline]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_stock_total=Sum('gamedetail__stock'))
+
+    @admin.display(description='Stock total', ordering='_stock_total')
+    def stock_total(self, obj):
+        total = obj._stock_total or 0
+        color = '#c62828' if total == 0 else '#2e7d32'
+        return format_html('<span style="color:{};font-weight:bold;">{}</span>', color, total)
 
 class SalesDetailAdmin(admin.ModelAdmin):
     def producto(obj):
