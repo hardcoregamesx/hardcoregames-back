@@ -853,10 +853,19 @@ def update_points_sale(id_user, points):
 
 
 def apply_coupon_points(coupon_code, id_user, order_id):
-    """If couponCode is present and valid, credit its points_given and log the redemption."""
+    """If couponCode is present, credit its points_given and log the redemption.
+
+    NOTA: la búsqueda del cupón ya NO filtra por is_valid=True. El descuento
+    del cupón se aplicó en el checkout cuando el cupón SI era válido; si aquí
+    exigimos que siga siendo válido, cualquier cupón que expire o se
+    desactive despues de la compra pierde su registro de uso para siempre,
+    aunque la venta sí haya ocurrido con el cupón aplicado. is_valid solo
+    debe controlar si un cupón puede seguir usándose en compras nuevas, no si
+    una compra ya hecha queda registrada.
+    """
     if not coupon_code:
         return
-    coupon = Coupon.objects.filter(name_coupon=coupon_code, is_valid=True).first()
+    coupon = Coupon.objects.filter(name_coupon=coupon_code).first()
     if not coupon:
         return
     instance_user = User.objects.filter(pk=id_user).first()
