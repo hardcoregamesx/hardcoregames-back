@@ -178,7 +178,7 @@ FROM_EMAIL=os.getenv("FROM_EMAIL")
 PASS_SMTP=os.getenv("PASS_SMTP")
 
 SUBJECT_EMAIL_FOR_TOKEN = "Código para cambio de contraseña HardCoreGames"
-SUBJECT_EMAIL_FOR_SALE = "Confirmación de compra en HardCoreGames"
+SUBJECT_EMAIL_FOR_SALE = "Pedido digital en Hardcore Games"
 SUBJECT_EMAIL_FOR_CONFIRMATION = "Confirmación de email en HardCoreGames"
 INFO_TEXT = os.getenv("INFO_TEXT")
 #INFO_TEXT = "INFO_TEXT"

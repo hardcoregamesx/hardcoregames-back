@@ -897,7 +897,7 @@ def send_email_notification(user_id, message_html):
     email_to = User.objects.filter(pk=user_id).first().email
     soup = BeautifulSoup(settings.EMAIL_FOR_SALE, features="html.parser")
     extra_soup = BeautifulSoup(message_html, 'html.parser')
-    body = soup.find("div", {"id": "body"})
+    body = soup.find(id="body")
     body.append(extra_soup)
     SendEmail().__int__(str(soup), settings.SUBJECT_EMAIL_FOR_SALE, email_to)
 
