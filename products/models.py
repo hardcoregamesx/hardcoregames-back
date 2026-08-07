@@ -177,6 +177,8 @@ class Files(models.Model):
     id_file = models.AutoField(primary_key=True)
     archivo = models.FileField(upload_to=settings.STATIC_URL_FILES)
     estado = models.BooleanField(default=True)
+    procesado = models.BooleanField(default=False, verbose_name='Procesado')
+    resultado = models.TextField(blank=True, null=True, verbose_name='Resultado del procesamiento')
 
     class Meta:
         verbose_name = 'un archivo para precios'
@@ -510,3 +512,28 @@ class GameDetailInventario(GameDetail):
         proxy = True
         verbose_name = 'Inventario de Producto'
         verbose_name_plural = 'Inventario de Productos'
+
+
+# ------------------------------------------------------------------ #
+#  Alias de producto (para busqueda por nombres alternativos)        #
+# ------------------------------------------------------------------ #
+
+class ProductAlias(models.Model):
+    """Apunta a la tabla products_productalias, que ya existe y es usada
+    por el servicio hc-fastapi (SQLAlchemy) para busqueda por alias en la
+    tienda. Django NO debe gestionar (crear/alterar/borrar) esta tabla:
+    managed = False evita que aparezca en makemigrations/migrate."""
+    alias = models.CharField(max_length=200)
+    producto = models.ForeignKey(
+        Products, on_delete=models.DO_NOTHING, db_column='producto_id', related_name='alias_set'
+    )
+    created_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'products_productalias'
+        verbose_name = 'un alias de producto'
+        verbose_name_plural = 'Alias de productos'
+
+    def __str__(self):
+        return self.alias

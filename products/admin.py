@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.core.cache import cache
+from django import forms
 from django.db import models
 from django.db.models import Sum
 from django.urls import reverse
@@ -17,7 +18,7 @@ from products.formProducts import ProductsFormCreate
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ProductsType, SaleDetail, ProductAccounts, Files, GameDetail, Consoles, \
     TypeGames, VariablesSistema, Licenses, TypeAccounts, Coupon, CouponRule, CouponRedemption, ProductoDestacado, \
-    GameDetailInventario
+    GameDetailInventario, ProductAlias
 from django.contrib.admin import DateFieldListFilter
 from products.UpdateProductForm import UpdateProductForm
 @admin.action(description="Update price and other fields")
@@ -58,7 +59,28 @@ class CloseToExp(SimpleListFilter):
             return queryset.filter(fecha_vencimiento__range=(today, today + timedelta(days=int(self.value()))))
 
 
+class ProductsAdminForm(forms.ModelForm):
+    alias = forms.CharField(
+        required=False,
+        label='Alias',
+        help_text='Nombres alternativos del producto, separados por comas. Ej: GTA 5, GTA V, Grand Theft Auto 5',
+        widget=forms.TextInput(attrs={'size': 100}),
+    )
+
+    class Meta:
+        model = Products
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            existentes = ProductAlias.objects.filter(producto=self.instance).values_list('alias', flat=True)
+            self.fields['alias'].initial = ', '.join(existentes)
+
+
 class ProductsAdmin(admin.ModelAdmin):
+    form = ProductsAdminForm
+
 
     list_display = ('id_product','title','stock_primaries', 'price_primaries',
                     'stock_secondaries', 'price_secondaries',
@@ -208,6 +230,22 @@ class ProductsAdmin(admin.ModelAdmin):
     search_fields = ['title',]
     list_filter = ["consola",]
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        raw = form.cleaned_data.get('alias', '') if hasattr(form, 'cleaned_data') else ''
+        aliases_nuevos = set(a.strip() for a in raw.split(',') if a.strip())
+
+        existentes_qs = ProductAlias.objects.filter(producto=obj)
+        aliases_existentes = set(existentes_qs.values_list('alias', flat=True))
+
+        a_borrar = aliases_existentes - aliases_nuevos
+        if a_borrar:
+            existentes_qs.filter(alias__in=a_borrar).delete()
+
+        a_crear = aliases_nuevos - aliases_existentes
+        for alias_texto in a_crear:
+            ProductAlias.objects.create(producto=obj, alias=alias_texto)
+
 class PaymentAdmin(admin.ModelAdmin):
     list_display = ['pk', 'description']
 
@@ -319,8 +357,15 @@ class SalesAdmin(admin.ModelAdmin):
 
 
 class FilesAdmin(admin.ModelAdmin):
-    list_display = ['archivo']
+    list_display = ['archivo', 'procesado', 'resultado_corto']
+    readonly_fields = ['procesado', 'resultado']
     form = FileForm
+
+    def resultado_corto(self, obj):
+        if not obj.resultado:
+            return '-'
+        return (obj.resultado[:120] + '...') if len(obj.resultado) > 120 else obj.resultado
+    resultado_corto.short_description = 'Resultado'
 
     def save_model(self, request, obj, form, change):
         for filename in glob.glob(settings.STATIC_URL_FILES + '*.xlsx'):
@@ -328,22 +373,65 @@ class FilesAdmin(admin.ModelAdmin):
         Files.objects.all().delete()
         super().save_model(request, obj, form, change)
 
-        threading.Thread(target=ManegePricesFile, daemon=True).start()
+        threading.Thread(target=ManegePricesFile, kwargs={'files_id': obj.pk}, daemon=True).start()
 
         self.message_user(
             request,
-            "El archivo fue subido. El procesamiento se está ejecutando en segundo plano."
+            "El archivo fue subido. El procesamiento se está ejecutando en segundo plano. "
+            "Actualiza esta lista en unos segundos para ver el resultado (cuántas cuentas se crearon y si hubo errores)."
         )
 class SystemVariablesAdmin(admin.ModelAdmin):
     list_display = ['nombre_variable', 'descripcion', 'valor', 'url', 'estado']
 
 
+class GameDetailStockInline(admin.TabularInline):
+    """
+    Muestra, dentro de cada cuenta, todas sus combinaciones de
+    producto/licencia/consola con el stock editable en línea — para no
+    tener que ir a la base de datos a averiguar qué cuenta tiene stock
+    disponible antes de una venta manual.
+    """
+    model = GameDetail
+    fk_name = 'cuenta'
+    extra = 0
+    can_delete = False
+    fields = ('col_producto', 'col_licencia', 'col_consola', 'precio', 'stock')
+    readonly_fields = ('col_producto', 'col_licencia', 'col_consola', 'precio')
+    verbose_name = 'combinación de stock'
+    verbose_name_plural = 'Stock por combinación (producto / licencia / consola)'
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description='Producto')
+    def col_producto(self, obj):
+        return obj.producto.title if obj.producto else '—'
+
+    @admin.display(description='Licencia')
+    def col_licencia(self, obj):
+        return str(obj.licencia) if obj.licencia else '—'
+
+    @admin.display(description='Consola')
+    def col_consola(self, obj):
+        return obj.consola or '—'
+
+
 class ProductAccountsAdmin(admin.ModelAdmin):
-    list_display = ['cuenta', 'password', 'activa', 'tipo_cuenta', 'dias_duracion', 'codigo_seguridad', ]
+    list_display = ['cuenta', 'password', 'activa', 'tipo_cuenta', 'dias_duracion', 'codigo_seguridad', 'stock_total']
     form = AccountProductForm
     search_fields = ['cuenta',]
     list_filter = ["tipo_cuenta",]
     list_per_page = 10
+    inlines = [GameDetailStockInline]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_stock_total=Sum('gamedetail__stock'))
+
+    @admin.display(description='Stock total', ordering='_stock_total')
+    def stock_total(self, obj):
+        total = obj._stock_total or 0
+        color = '#c62828' if total == 0 else '#2e7d32'
+        return format_html('<span style="color:{};font-weight:bold;">{}</span>', color, total)
 
 class SalesDetailAdmin(admin.ModelAdmin):
     def producto(obj):
