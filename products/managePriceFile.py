@@ -163,8 +163,12 @@ def save_or_update_game_detail(id_product, id_console, id_license, duration_days
 
     if not created:
         row_game_detail.stock += 1
+        if row_game_detail.precio == 0 and price > 0:
+            row_game_detail.precio = price
+        if row_game_detail.precio_descuento == 0 and offer_price > 0:
+            row_game_detail.precio_descuento = offer_price
         row_game_detail.save()
 
 
 def check_sheet_price(sheet):
-    return sheet.strip() != "None" or "x" in sheet
+    return sheet.strip() != "None" and "x" not in sheet.lower()
