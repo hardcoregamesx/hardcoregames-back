@@ -139,3 +139,6 @@ products/migrations/
 users/migrations/
 *.msg
 files/
+*.bak
+*.bak.*
+*.bak_*
