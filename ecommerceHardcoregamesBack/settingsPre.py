@@ -243,3 +243,8 @@ LOGGING = {
         },
     },
 }
+
+# Sesiones persistentes
+SESSION_COOKIE_AGE = 31536000
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_SAVE_EVERY_REQUEST = True
