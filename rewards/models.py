@@ -26,6 +26,7 @@ PRIZE_TYPES = [
     ('COUPON_PERCENT', 'Cupón de porcentaje'),
     ('POINTS', 'Puntos'),
     ('NOTHING', 'Nada'),
+    ('MANUAL_CLAIM', 'Reclamo manual por soporte (productos/suscripciones)'),
 ]
 
 
