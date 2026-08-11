@@ -68,12 +68,12 @@ def index(request):
 def register(request, self=None):
     if request.method == "POST":
         body = GetJsonFromRequest.__int__(self, request)
-        first_name = body['first_name']
-        last_name = body['last_name']
-        email = body['email']
-        password = body['password']
-        phone_number = body['phone_number']
-        avatar = body['avatar']
+        first_name = body.get('first_name', '')
+        last_name = body.get('last_name', '')
+        email = body.get('email', '')
+        password = body.get('password', '')
+        phone_number = body.get('phone_number', '')
+        avatar = body.get('avatar', '')
 
         exist_user = User.objects.filter(username=email).exists()
         if exist_user:
