@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'products',
+    'rewards',
 ]
 
 JAZZMIN_SETTINGS = {
