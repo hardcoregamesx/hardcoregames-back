@@ -108,7 +108,7 @@ class RouletteSpin(models.Model):
     roulette = models.ForeignKey(Roulette, on_delete=models.DO_NOTHING, db_column='roulette_id', related_name='spins')
     prize = models.ForeignKey(RoulettePrize, on_delete=models.DO_NOTHING, db_column='prize_id', related_name='spins')
     points_spent = models.IntegerField(default=0)
-    coupon = models.ForeignKey(Coupon, on_delete=models.DO_NOTHING, db_column='coupon_id', null=True, blank=True, related_name='roulette_spin')
+    coupon = models.ForeignKey(Coupon, on_delete=models.SET_NULL, db_column='coupon_id', null=True, blank=True, related_name='roulette_spin')
     idempotency_key = models.CharField(max_length=100)
     created_at = models.DateTimeField()
 
