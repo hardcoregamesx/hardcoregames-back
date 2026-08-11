@@ -229,7 +229,7 @@ def set_password(request, self=None):
 def create_email_validation_token(request, self=None):
     if request.method == "POST":
         body = GetJsonFromRequest.__int__(self, request)
-        username = body["username"]
+        username = body.get("username", body.get("email", ""))
 
         # No creamos token si ya existe un usuario con este email
         exist_user = User.objects.filter(username=username).exists()
@@ -269,7 +269,7 @@ def create_email_validation_token(request, self=None):
 def validate_email_token(request, self=None):
     if request.method == "POST":
         body = GetJsonFromRequest.__int__(self, request)
-        username = body["username"]
+        username = body.get("username", body.get("email", ""))
         token = body["token"]
         token_reason = body.get("reason", "email_validation_token")  # Default reason if not provided
 

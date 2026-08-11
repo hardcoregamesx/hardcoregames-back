@@ -147,6 +147,14 @@ DATABASES = {
 
 #DATABASES["default"] = dj_database_url.parse("postgres://hardcoregames_user:2q8EyqLkflfpSjtMfAkAphoThSmkDy1V@dpg-ckhfi94ldqrs73a4kc3g-a.oregon-postgres.render.com/hardcoregames")
 
+# Cache compartido entre workers de Gunicorn (LocMemCache falla con --workers > 1)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+        'LOCATION': '/tmp/django_cache',
+    }
+}
+
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 
