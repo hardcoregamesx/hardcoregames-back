@@ -244,6 +244,21 @@ class Transactions(models.Model):
 
 
 class Coupon(models.Model):
+    DISCOUNT_TYPE_CHOICES = [
+        ('PERCENTAGE', 'Porcentaje'),
+        ('FIXED_AMOUNT', 'Monto fijo (bono)'),
+    ]
+    SOURCE_CHOICES = [
+        ('MANUAL', 'Manual'),
+        ('WELCOME', 'Bienvenida'),
+        ('ROULETTE', 'Ruleta'),
+        ('MISSION', 'Misión'),
+        ('LOYALTY', 'Fidelización'),
+        ('CAMPAIGN', 'Campaña'),
+        ('ADMIN', 'Administración'),
+        ('REFERRAL', 'Referido'),
+    ]
+
     id_coupon = models.AutoField(primary_key=True)
     name_coupon = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -254,6 +269,9 @@ class Coupon(models.Model):
     game_details = models.ManyToManyField('GameDetail', blank=True, related_name='coupons')
     percentage_off = models.IntegerField(default=0)
     points_given = models.IntegerField(default=0)
+    discount_type = models.CharField(max_length=20, choices=DISCOUNT_TYPE_CHOICES, default='PERCENTAGE')
+    fixed_amount = models.IntegerField(default=0, help_text='Monto en COP cuando discount_type = FIXED_AMOUNT.')
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='MANUAL')
 
     class Meta:
         db_table = 'coupons_coupon'

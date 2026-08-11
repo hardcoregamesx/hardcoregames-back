@@ -27,6 +27,7 @@ from products.productSerializers import ProductsSerializer, ProductSerializer, S
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
 from users.models import User_Customized
+from rewards.models import PointTransaction
 from utils.SendEmail import SendEmail
 from utils.getJsonFromRequest import GetJsonFromRequest
 from django.http import JsonResponse
@@ -749,7 +750,13 @@ def confirm_sale(request):
                 product_selected = combination_selected.producto
                 if user and not user.is_superuser:
                     combination_selected.stock = F('stock') - 1
-                    update_points_sale(id_user, product_selected.puntos_venta)
+                    update_points_sale(
+                        id_user,
+                        product_selected.puntos_venta,
+                        reference_type='product',
+                        reference_id=product_selected.id_product,
+                        description=f'Compra: {product_selected.title}',
+                    )
                     delete_shopping_product(item['id_combination'], id_user)
                     combination_selected.save()
                 create_sale(item, id_user, account_selected)
@@ -845,10 +852,34 @@ def create_sale(sale, id_user, account_selected):
     sale_detail.save()
 
 
-def update_points_sale(id_user, points):
+def update_points_sale(id_user, points, reference_type=None, reference_id=None, description=''):
+    """Credit points for a completed sale and record it in the ledger.
+
+    Kept as a bulk .update() (not a fetched instance .save()) to preserve the
+    original no-op-if-no-profile behavior; the ledger row is written from a
+    fresh read right after, so balance_after always reflects what actually
+    landed in the DB.
+    """
+    if not points:
+        return
     instance_user = User.objects.filter(pk=id_user).first()
-    User_Customized.objects.filter(user=instance_user).update(
+    if not instance_user:
+        return
+    updated = User_Customized.objects.filter(user=instance_user).update(
         puntos=F("puntos") + points
+    )
+    if not updated:
+        return
+    profile = User_Customized.objects.filter(user=instance_user).first()
+    PointTransaction.objects.create(
+        user=instance_user,
+        delta=points,
+        balance_after=profile.puntos,
+        reason='PURCHASE',
+        reference_type=reference_type,
+        reference_id=str(reference_id) if reference_id is not None else None,
+        description=description,
+        created_at=now(),
     )
 
 
@@ -872,9 +903,21 @@ def apply_coupon_points(coupon_code, id_user, order_id):
     if not instance_user:
         return
     if coupon.points_given:
-        User_Customized.objects.filter(user=instance_user).update(
+        updated = User_Customized.objects.filter(user=instance_user).update(
             puntos=F("puntos") + coupon.points_given
         )
+        if updated:
+            profile = User_Customized.objects.filter(user=instance_user).first()
+            PointTransaction.objects.create(
+                user=instance_user,
+                delta=coupon.points_given,
+                balance_after=profile.puntos,
+                reason='COUPON',
+                reference_type='coupon',
+                reference_id=str(coupon.id_coupon),
+                description=f'Cupón {coupon.name_coupon} (orden {order_id})',
+                created_at=now(),
+            )
     CouponRedemption.objects.create(
         coupon=coupon,
         user=instance_user,

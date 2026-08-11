@@ -505,12 +505,15 @@ class CouponAdmin(admin.ModelAdmin):
         'name_coupon',
         'is_valid_badge',
         'expiration_date',
+        'discount_type',
         'percentage_off',
+        'fixed_amount',
+        'source',
         'points_given',
         'active_rules_count',
         'total_redemptions',
     )
-    list_filter   = ('is_valid', 'expiration_date', 'user')
+    list_filter   = ('is_valid', 'discount_type', 'source', 'expiration_date', 'user')
     search_fields = ('name_coupon',)
     date_hierarchy = 'expiration_date'
     ordering      = ('-created_at',)
@@ -522,8 +525,8 @@ class CouponAdmin(admin.ModelAdmin):
             'Información general',
             {
                 'fields': (
-                    'name_coupon', 'is_valid', 'expiration_date',
-                    'percentage_off', 'points_given',
+                    'name_coupon', 'is_valid', 'expiration_date', 'source',
+                    'discount_type', 'percentage_off', 'fixed_amount', 'points_given',
                 )
             },
         ),
