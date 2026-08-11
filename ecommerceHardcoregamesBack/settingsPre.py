@@ -206,3 +206,40 @@ EMAIL_FOR_TOKEN = "<html>" \
                   "</html>"
 
 EMAIL_FOR_SALE = '<div style="max-width:560px;background-color:#f5f5f5;border-radius:5px;margin:40px auto;font-family:Open Sans,Helvetica,Arial;font-size:15px;color:#000000"> <div class="adM"> </div> <div style="font-weight:normal"> <div class="adM"> </div> <div style="text-align:center;font-weight:600;font-size:26px;padding:20px 0;padding-top:41px;padding-bottom:22px"><img src="https://firebasestorage.googleapis.com/v0/b/hardcoregames-3aa7e.appspot.com/o/HARDCORE%20GAMING%20Logotipo%20PNG.png?alt=media&token=c4799166-23c1-4fe8-8396-fa13767c035b" width="190" class="CToWUd" data-bit="iit"> </div> </div> <div style="padding:0 20px 20px 20px"> <hr style="border-color:#e0e0e0;border-width:1px"> <div style="padding:10px 0;text-align:justify;line-height:1.3"> <div style="font-size:19px;margin-bottom:30px">¡Hola!<br></div> <div id="body" style="margin-top: 8%;"> Hemos recibido tu compra, a continuación se detallan los datos de acceso necesarios para obetener tu producto: <hr style="border-color:#e0e0e0;border-width:1px"> </div> <!-- <div style="padding:20px 0 0 0;text-align:center"> <a style="background:#2168f5;color:#fff;padding:4px 8px;text-decoration:none;border-radius:3px;letter-spacing:0.3px" href="https://web.plattaforma.com/autenticacion/iniciar-sesion" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://web.plattaforma.com/autenticacion/iniciar-sesion&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw0fVv_gii5BusId7t4exOzS">Ir a licitación</a> </div> --> <div style="margin-top:40px"> Equipo HardCoreGames </div> </div> <hr style="border-color:#e0e0e0;border-width:1px"> <div style="padding:12px;text-align:left"> <div style="font-size:13px"> <div style="font-size:15px;font-weight:bold;margin-bottom:5px">Contacta a soporte:</div> <a href="mailto:hardcoregaming453@gmail.com" style="text-decoration:none;color:black;display:flex;float:left" target="_blank"> <img style="width:20px" src="https://ci4.googleusercontent.com/proxy/bN9cvP1P6fpjNlf1RWVks6gbzAJFexZgOiQitHCz1R6iSMlLqFULZ5n--57oj39eObIWv_0cwM21CjhFt2IZqWbTwOdCquh6GcNOJ0nKQUo=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/email-black.png" class="CToWUd" data-bit="iit">&nbsp;hardcoregaming453@gmail.com </a> <a style="float:left;text-decoration:none;color:black">&nbsp;|&nbsp;</a> <a href="https://wa.link/y72sz9" style="text-decoration:none;color:black;display:flex" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://wa.me/50766094872&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw0vROaGkqYwpmeagr8k1FP4"> <img style="width:20px" src="https://ci6.googleusercontent.com/proxy/YIHg9Jq-iFEJYfxml9vCTYAnNKH9wWzmjPZSCGZE3MCovRXxisN_qwG5bfjssweETXYSOCxy2h79G_xXomw76yHkyAZQqnzkqu4zx3lo1KhrzvU=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/whatsapp-black.png" class="CToWUd" data-bit="iit">+57&nbsp;3167431812 </a> </div> <!-- <div> <div style="font-weight:bold;margin-bottom:5px">Lleva a Plattaforma contigo</div> <a href="https://apps.apple.com/co/app/plattaforma/id6446603077" style="text-decoration:none" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://apps.apple.com/co/app/plattaforma/id6446603077&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw317EuiXQMO9eLxvBi63AuA"> <img style="width:128px;padding-right:5px" src="https://ci5.googleusercontent.com/proxy/QvSWpo-UrIu8Xok5OXxMtFwpv1vnJDtRCeUS4-PNCivcVODdFrbjPNhf3uUOxHxljPu_GUpX0x3qCaf2mwudbYyERRN0E1vx5ncbDsJz=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/app_store.png" class="CToWUd" data-bit="iit"> </a> <a href="https://play.google.com/store/apps/details?id=com.plattaforma.app" style="text-decoration:none" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://play.google.com/store/apps/details?id%3Dcom.plattaforma.app&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw2sFVvUEMwwu2R-bK0N3TRI"> <img style="width:128px;padding-left:5px" src="https://ci5.googleusercontent.com/proxy/tM0NE0VqxDhukwUVxWbfaxv30TvRnl-32ugy_CszikpeY9ZLZnYBTEwveJt4v5KiyIxGScLkfEmK2T77a03nXaQX6_T_oxZLuYlrQQUoTA=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/play_store.png" class="CToWUd" data-bit="iit"> </a> </div> --> <br> </div> <hr style="border-color:#e0e0e0;border-width:1px"> <div style="padding:12px;text-align:left"> <div style="font-size:13px"> <div style="font-size:15px;font-weight:bold;margin-bottom:20px">Como comprar:</div> <div style="font-size:13px;font-weight:bold;margin-bottom:15px">Consolas Xbox:</div> <div style="font-size:12px;font-weight:bold;margin-bottom:5px">Instalación licencia primaria:</div><a href="https://youtu.be/0K0D3CeKamM?si=XUJX-sgteQWOPrJt" style="text-decoration:none;color:black;display:flex;color: dodgerblue;" target="_blank">Click aquí</a><div style="font-size:12px;font-weight:bold;margin-top:15px">Instalación licencia secundaria:</div><a href="https://youtu.be/-WxGkAG__pQ?si=x1-kAa-1ph1EqkL8" style="text-decoration:none;color:black;display:flex;color: dodgerblue;" target="_blank">Click aquí</a> </div> <br> <!-- <div> <div style="font-weight:bold;margin-bottom:5px">Lleva a Plattaforma contigo</div> <a href="https://apps.apple.com/co/app/plattaforma/id6446603077" style="text-decoration:none" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://apps.apple.com/co/app/plattaforma/id6446603077&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw317EuiXQMO9eLxvBi63AuA"> <img style="width:128px;padding-right:5px" src="https://ci5.googleusercontent.com/proxy/QvSWpo-UrIu8Xok5OXxMtFwpv1vnJDtRCeUS4-PNCivcVODdFrbjPNhf3uUOxHxljPu_GUpX0x3qCaf2mwudbYyERRN0E1vx5ncbDsJz=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/app_store.png" class="CToWUd" data-bit="iit"> </a> <a href="https://play.google.com/store/apps/details?id=com.plattaforma.app" style="text-decoration:none" target="_blank" data-saferedirecturl="https://www.google.com/url?q=https://play.google.com/store/apps/details?id%3Dcom.plattaforma.app&amp;source=gmail&amp;ust=1700761454173000&amp;usg=AOvVaw2sFVvUEMwwu2R-bK0N3TRI"> <img style="width:128px;padding-left:5px" src="https://ci5.googleusercontent.com/proxy/tM0NE0VqxDhukwUVxWbfaxv30TvRnl-32ugy_CszikpeY9ZLZnYBTEwveJt4v5KiyIxGScLkfEmK2T77a03nXaQX6_T_oxZLuYlrQQUoTA=s0-d-e1-ft#https://backend.plattaforma.com/images/iconos/play_store.png" class="CToWUd" data-bit="iit"> </a> </div> --> <br> <div> Copyright 2024 </div> </div> <div class="yj6qo"></div> <div class="adL"></div> </div></div>'
+
+
+# --- Logging: con DEBUG=False Django no manda las excepciones a la consola.
+# Sin esto, un 500 no aparece en `docker logs hc-django`.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
