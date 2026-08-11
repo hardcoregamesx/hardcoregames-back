@@ -507,6 +507,36 @@ class CouponRedemption(models.Model):
 
 
 # ------------------------------------------------------------------ #
+#  CouponPurgeLog                                                      #
+# ------------------------------------------------------------------ #
+
+class CouponPurgeLog(models.Model):
+    """Contador agregado de cupones vencidos-sin-usar que fueron purgados.
+
+    Una fila por (source, period), nunca una fila por cupón: así el conteo
+    histórico de "generados vs usados" no se pierde al purgar, sin que esta
+    tabla crezca con el volumen de cupones. Tabla creada a mano vía SQL
+    directo (managed = False), no vía migrate — igual que ProductAlias, ver
+    nota en products/models.py sobre esta app sin migraciones.
+    """
+
+    source = models.CharField(max_length=30, choices=Coupon.SOURCE_CHOICES)
+    period = models.CharField(max_length=7, help_text='Mes en formato YYYY-MM, según created_at del cupón purgado.')
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        managed = False
+        db_table = 'products_couponpurgelog'
+        verbose_name = 'purga de cupones'
+        verbose_name_plural = 'Purgas de cupones (histórico agregado)'
+        unique_together = [('source', 'period')]
+        ordering = ['-period', 'source']
+
+    def __str__(self):
+        return f'{self.source} {self.period}: {self.count}'
+
+
+# ------------------------------------------------------------------ #
 #  Proxy model – Productos Destacados                                  #
 # ------------------------------------------------------------------ #
 

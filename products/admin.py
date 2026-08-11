@@ -18,7 +18,7 @@ from products.formProducts import ProductsFormCreate
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ProductsType, SaleDetail, ProductAccounts, Files, GameDetail, Consoles, \
     TypeGames, VariablesSistema, Licenses, TypeAccounts, Coupon, CouponRule, CouponRedemption, ProductoDestacado, \
-    GameDetailInventario, ProductAlias
+    GameDetailInventario, ProductAlias, CouponPurgeLog
 from django.contrib.admin import DateFieldListFilter
 from products.UpdateProductForm import UpdateProductForm
 @admin.action(description="Update price and other fields")
@@ -768,3 +768,19 @@ class CouponRedemptionAdmin(admin.ModelAdmin):
     @admin.display(description='Usuario', ordering='user__username')
     def username(self, obj):
         return obj.user.username
+
+
+@admin.register(CouponPurgeLog)
+class CouponPurgeLogAdmin(admin.ModelAdmin):
+    list_display  = ('source', 'period', 'count')
+    list_filter   = ('source', 'period')
+    ordering      = ('-period', 'source')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
