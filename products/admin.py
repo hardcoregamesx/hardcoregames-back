@@ -810,15 +810,18 @@ class OfertaSemanaFilter(SimpleListFilter):
 
 @admin.register(ProductoOfertaSemana)
 class ProductoOfertaSemanaAdmin(admin.ModelAdmin):
-    list_display = ('title', 'oferta_semana')
-    list_editable = ('oferta_semana',)
-    list_filter = (OfertaSemanaFilter, 'tipo_juego', 'consola')
+    list_display = ('title', 'oferta_semana', 'destacado')
+    list_editable = ('oferta_semana', 'destacado')
+    list_filter = (OfertaSemanaFilter, DestacadoFilter, 'tipo_juego', 'consola')
     search_fields = ('title',)
-    actions = [marcar_oferta_semana, quitar_oferta_semana, quitar_todas_ofertas_semana]
+    actions = [
+        marcar_oferta_semana, quitar_oferta_semana, quitar_todas_ofertas_semana,
+        marcar_destacado, quitar_destacado, quitar_todos_destacados,
+    ]
     list_per_page = 20
 
-    # Only expose the fields that make sense for this view
-    fields = ('title', 'oferta_semana')
+    # Also expose destacado here so both badges can be managed from one screen
+    fields = ('title', 'oferta_semana', 'destacado')
     readonly_fields = ('title',)
 
     def has_add_permission(self, request):
