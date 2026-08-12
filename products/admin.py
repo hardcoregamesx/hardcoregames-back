@@ -18,7 +18,7 @@ from products.formProducts import ProductsFormCreate
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ProductsType, SaleDetail, ProductAccounts, Files, GameDetail, Consoles, \
     TypeGames, VariablesSistema, Licenses, TypeAccounts, Coupon, CouponRule, CouponRedemption, ProductoDestacado, \
-    GameDetailInventario, ProductAlias, CouponPurgeLog
+    GameDetailInventario, ProductAlias, CouponPurgeLog, ProductoOfertaSemana
 from django.contrib.admin import DateFieldListFilter
 from products.UpdateProductForm import UpdateProductForm
 @admin.action(description="Update price and other fields")
@@ -704,6 +704,16 @@ def quitar_destacado(modeladmin, request, queryset):
     )
 
 
+@admin.action(description='Quitar TODOS los destacados (ignora selección)')
+def quitar_todos_destacados(modeladmin, request, queryset):
+    updated = Products.objects.filter(destacado=True).update(destacado=False)
+    modeladmin.message_user(
+        request,
+        f'{updated} producto(s) quitado(s) de destacados (limpieza total).',
+        messages.SUCCESS,
+    )
+
+
 class DestacadoFilter(SimpleListFilter):
     """Filter to switch quickly between featured / not-featured products."""
 
@@ -730,11 +740,85 @@ class ProductoDestacadoAdmin(admin.ModelAdmin):
     list_editable = ('destacado',)
     list_filter = (DestacadoFilter, 'tipo_juego', 'consola')
     search_fields = ('title',)
-    actions = [marcar_destacado, quitar_destacado]
+    actions = [marcar_destacado, quitar_destacado, quitar_todos_destacados]
     list_per_page = 20
 
     # Only expose the fields that make sense for this view
     fields = ('title', 'destacado')
+    readonly_fields = ('title',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+# ------------------------------------------------------------------ #
+#  Oferta de la Semana admin                                          #
+# ------------------------------------------------------------------ #
+
+@admin.action(description='Marcar como Oferta de la Semana')
+def marcar_oferta_semana(modeladmin, request, queryset):
+    updated = queryset.update(oferta_semana=True)
+    modeladmin.message_user(
+        request,
+        f'{updated} producto(s) marcado(s) como oferta de la semana.',
+        messages.SUCCESS,
+    )
+
+
+@admin.action(description='Quitar de Oferta de la Semana')
+def quitar_oferta_semana(modeladmin, request, queryset):
+    updated = queryset.update(oferta_semana=False)
+    modeladmin.message_user(
+        request,
+        f'{updated} producto(s) quitado(s) de oferta de la semana.',
+        messages.SUCCESS,
+    )
+
+
+@admin.action(description='Quitar TODAS las ofertas de la semana (ignora selección)')
+def quitar_todas_ofertas_semana(modeladmin, request, queryset):
+    updated = Products.objects.filter(oferta_semana=True).update(oferta_semana=False)
+    modeladmin.message_user(
+        request,
+        f'{updated} producto(s) quitado(s) de oferta de la semana (limpieza total).',
+        messages.SUCCESS,
+    )
+
+
+class OfertaSemanaFilter(SimpleListFilter):
+    """Filter to switch quickly between week-offer / not-week-offer products."""
+
+    title = 'estado oferta de la semana'
+    parameter_name = 'oferta_semana'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('1', 'Solo oferta de la semana'),
+            ('0', 'No oferta de la semana'),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == '1':
+            return queryset.filter(oferta_semana=True)
+        if self.value() == '0':
+            return queryset.filter(oferta_semana=False)
+        return queryset
+
+
+@admin.register(ProductoOfertaSemana)
+class ProductoOfertaSemanaAdmin(admin.ModelAdmin):
+    list_display = ('title', 'oferta_semana')
+    list_editable = ('oferta_semana',)
+    list_filter = (OfertaSemanaFilter, 'tipo_juego', 'consola')
+    search_fields = ('title',)
+    actions = [marcar_oferta_semana, quitar_oferta_semana, quitar_todas_ofertas_semana]
+    list_per_page = 20
+
+    # Only expose the fields that make sense for this view
+    fields = ('title', 'oferta_semana')
     readonly_fields = ('title',)
 
     def has_add_permission(self, request):

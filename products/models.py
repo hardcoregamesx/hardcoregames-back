@@ -61,6 +61,7 @@ class Products(models.Model):
     puntos_venta = models.IntegerField(default=0)
     puede_rentarse = models.BooleanField(default=True)
     destacado = models.BooleanField(default=False)
+    oferta_semana = models.BooleanField(default=False)
 
     def __str__(self):
         return str(self.id_product) + " " + str(self.title)
@@ -547,6 +548,19 @@ class ProductoDestacado(Products):
         proxy = True
         verbose_name = 'Producto Destacado'
         verbose_name_plural = 'Productos Destacados'
+
+
+# ------------------------------------------------------------------ #
+#  Proxy model – Productos Oferta de la Semana                        #
+# ------------------------------------------------------------------ #
+
+class ProductoOfertaSemana(Products):
+    """Proxy model used exclusively by the Oferta de la Semana admin page."""
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Producto Oferta de la Semana'
+        verbose_name_plural = 'Productos Oferta de la Semana'
 
 
 # ------------------------------------------------------------------ #
