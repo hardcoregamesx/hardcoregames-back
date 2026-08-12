@@ -10,12 +10,29 @@ from products.models import ProductAccounts, Consoles, Licenses, Products, GameD
     PriceForSuscription, TypeSuscriptionAccounts
 
 
+def last_data_row(sheet, col=1, max_gap=50):
+    """Ultima fila con datos en `col`. Evita recorrer el max_row inflado
+    que openpyxl reporta cuando la hoja tiene formato en filas vacias."""
+    last = 1
+    gap = 0
+    for r in range(2, sheet.max_row + 1):
+        value = sheet.cell(row=r, column=col).value
+        if value is None or str(value).strip() == "":
+            gap += 1
+            if gap >= max_gap:
+                break
+        else:
+            gap = 0
+            last = r
+    return last
+
+
 def read_file_ps(sheetPs, id_primaria, id_secundaria):
     id_ps4 = Consoles.objects.filter(descripcion__icontains="playstation 4")
     id_ps5 = Consoles.objects.filter(descripcion__icontains="playstation 5")
 
     sheet = sheetPs
-    m_row = sheet.max_row
+    m_row = last_data_row(sheet)
     batch_size = 6
 
     for start in range(2, m_row + 1, batch_size):
@@ -69,7 +86,7 @@ def read_file_xbx(sheetPs, id_primaria, id_secundaria):
     licence_pc = Licenses.objects.filter(descripcion__icontains="pc")
 
     sheet = sheetPs
-    m_row = sheet.max_row
+    m_row = last_data_row(sheet)
     batch_size = 5  # Process 5 rows at a time
 
     for start in range(2, m_row + 1, batch_size):
@@ -209,4 +226,4 @@ def save_or_update_game_detail(id_product, id_console, id_license, duration_days
 
 
 def check_sheet_price(sheet):
-    return sheet.strip() != "None" and "x" not in sheet.lower()
+    return str(sheet).strip().lower() not in ("", "none")
