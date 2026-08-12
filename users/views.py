@@ -85,6 +85,11 @@ def register(request, self=None):
                 JsonResponse({'message': 'debes indicar un email valido', "status": 400, "code": "01"}),
                 content_type="application/json", status=400)
 
+        if not password or len(password) < 8:
+            return HttpResponse(
+                JsonResponse({'message': 'la contrasena debe tener al menos 8 caracteres', "status": 400, "code": "01"}),
+                content_type="application/json", status=400)
+
         exist_user = User.objects.filter(username=email).exists()
         if exist_user:
             return HttpResponse(
