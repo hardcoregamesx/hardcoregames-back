@@ -117,17 +117,55 @@ def process_batch_xbx(sheet, start, end, id_xbox, id_code, id_pc, licence_pc, id
                 save_or_update_game_detail(id_product, console, license_type, duration_days, account_for_producto)
 
 class ManegePricesFile:
-    def __init__(self):
-        path_file_upload = glob.glob(settings.STATIC_URL_FILES + "/*.xlsx")[0]
-        path = os.path.abspath(path_file_upload.replace('\\', '/'))
-        excel_document = openpyxl.load_workbook(path)
-        sheet_ps = excel_document.get_sheet_by_name('cuentas_ps')
-        sheet_xbox = excel_document.get_sheet_by_name('cuentas_xbox')
-        id_primaria = Licenses.objects.filter(descripcion__icontains="primaria")
-        id_secundaria = Licenses.objects.filter(descripcion__icontains="secundaria")
+    def __init__(self, files_id=None):
+        import traceback
+        from django.db import connection
+        from products.models import Files
 
-        read_file_ps(sheet_ps, id_primaria, id_secundaria)
-        read_file_xbx(sheet_xbox, id_primaria, id_secundaria)
+        registro = Files.objects.filter(pk=files_id).first() if files_id else None
+        cuentas_antes = ProductAccounts.objects.count()
+        detalles_antes = GameDetail.objects.count()
+        procesado = False
+
+        try:
+            archivos = glob.glob(settings.STATIC_URL_FILES + "/*.xlsx")
+            if not archivos:
+                raise FileNotFoundError(
+                    "No se encontro ningun .xlsx en %s" % settings.STATIC_URL_FILES)
+
+            path = os.path.abspath(archivos[0].replace('\\', '/'))
+            excel_document = openpyxl.load_workbook(path)
+
+            for hoja in ('cuentas_ps', 'cuentas_xbox'):
+                if hoja not in excel_document.sheetnames:
+                    raise KeyError(
+                        "Falta la hoja '%s'. Hojas del archivo: %s"
+                        % (hoja, ', '.join(excel_document.sheetnames)))
+
+            sheet_ps = excel_document.get_sheet_by_name('cuentas_ps')
+            sheet_xbox = excel_document.get_sheet_by_name('cuentas_xbox')
+            id_primaria = Licenses.objects.filter(descripcion__icontains="primaria")
+            id_secundaria = Licenses.objects.filter(descripcion__icontains="secundaria")
+
+            read_file_ps(sheet_ps, id_primaria, id_secundaria)
+            read_file_xbx(sheet_xbox, id_primaria, id_secundaria)
+
+            mensaje = ("Procesado OK. Cuentas nuevas: %d. Registros de juego nuevos: %d."
+                       % (ProductAccounts.objects.count() - cuentas_antes,
+                          GameDetail.objects.count() - detalles_antes))
+            procesado = True
+        except Exception as exc:
+            traceback.print_exc()
+            mensaje = "ERROR: %s: %s\n\n%s" % (
+                type(exc).__name__, exc, traceback.format_exc())
+
+        try:
+            if registro:
+                registro.procesado = procesado
+                registro.resultado = mensaje[:8000]
+                registro.save(update_fields=['procesado', 'resultado'])
+        finally:
+            connection.close()
 
 
 
