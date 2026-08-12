@@ -8,6 +8,8 @@ from django.contrib.auth.models import User
 from django.core import serializers
 from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 
 from ecommerceHardcoregamesBack import settings
@@ -75,11 +77,19 @@ def register(request, self=None):
         phone_number = body.get('phone_number', '')
         avatar = body.get('avatar', '')
 
+        email = (email or '').strip()
+        try:
+            validate_email(email)
+        except ValidationError:
+            return HttpResponse(
+                JsonResponse({'message': 'debes indicar un email valido', "status": 400, "code": "01"}),
+                content_type="application/json", status=400)
+
         exist_user = User.objects.filter(username=email).exists()
         if exist_user:
             return HttpResponse(
-                JsonResponse({'message': 'ya esxiste un usuario con este email', "status": 200, "code": "01"}),
-                content_type="application/json")
+                JsonResponse({'message': 'ya existe un usuario con este email', "status": 400, "code": "01"}),
+                content_type="application/json", status=400)
         user = User.objects.create_user(
             first_name=first_name,
             last_name=last_name,
@@ -232,10 +242,18 @@ def create_email_validation_token(request, self=None):
         username = body.get("username", body.get("email", ""))
 
         # No creamos token si ya existe un usuario con este email
+        username = (username or '').strip()
+        try:
+            validate_email(username)
+        except ValidationError:
+            return HttpResponse(
+                JsonResponse({'message': 'debes indicar un email valido', "status": 200, "code": "01"}),
+                content_type="application/json")
+
         exist_user = User.objects.filter(username=username).exists()
         if exist_user:
             return HttpResponse(
-                JsonResponse({'message': 'ya esxiste un usuario con este email', "status": 200, "code": "01"}),
+                JsonResponse({'message': 'ya existe un usuario con este email', "status": 200, "code": "01"}),
                 content_type="application/json")
 
         subject_email = settings.SUBJECT_EMAIL_FOR_CONFIRMATION
