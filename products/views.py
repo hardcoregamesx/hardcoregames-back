@@ -767,6 +767,7 @@ def confirm_sale(request):
 
         order_id = ','.join(str(item['id_combination']) for item in json_request['data'])
         apply_coupon_points(coupon_code, id_user, order_id)
+        deduct_balance_exchange(id_user, json_request.get('balanceApplied') or 0)
 
         if message_html != "":
             send_email_notification(id_user, message_html)
@@ -923,6 +924,26 @@ def apply_coupon_points(coupon_code, id_user, order_id):
         user=instance_user,
         order_id=order_id,
     )
+
+
+def deduct_balance_exchange(id_user, amount):
+    """Descuenta el saldo (balance_exchange) aplicado como descuento en la compra.
+
+    balance_exchange vive en users_user_customized pero solo el modelo
+    SQLAlchemy de FastAPI lo declara (ver app/models.py, UserCustomized); el
+    modelo Django (User_Customized) no tiene ese campo. Se usa SQL directo en
+    vez de añadirlo al ORM para no arrastrar una migración de un campo que ya
+    existe en la tabla real. GREATEST(...,0) evita saldo negativo si hay una
+    carrera con otro canje concurrente.
+    """
+    if not amount or amount <= 0:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE users_user_customized SET balance_exchange = GREATEST(balance_exchange - %s, 0) "
+            "WHERE user_id = %s",
+            [amount, id_user],
+        )
 
 
 def delete_shopping_product(id_combination: str, id_user: str):
@@ -1341,6 +1362,26 @@ def generate_hash_bold(request):
 
     if not all([amount, currency, request_transaction]):
         return JsonResponse({"error": "Missing required fields"}, status=400)
+
+    try:
+        balance_applied = int(json.loads(request_transaction).get('balanceApplied') or 0)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        balance_applied = 0
+
+    if balance_applied < 0:
+        return JsonResponse({"error": "balanceApplied inválido"}, status=400)
+
+    if balance_applied > 0:
+        user_id = json.loads(request_transaction)['id_user']
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT balance_exchange FROM users_user_customized WHERE user_id = %s",
+                [user_id],
+            )
+            row = cursor.fetchone()
+        current_balance = row[0] if row else 0
+        if balance_applied > current_balance:
+            return JsonResponse({"error": "Saldo insuficiente"}, status=400)
 
     order_id = generate_order_id()
     signature = generate_signature(order_id, amount, currency, settings.SECRET_KEY_BOLD)
