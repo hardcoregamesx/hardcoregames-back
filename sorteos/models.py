@@ -47,6 +47,12 @@ class Sorteo(models.Model):
     class Meta:
         managed = False
         db_table = 'sorteos_sorteo'
+        # app_label='rewards' agrupa este modelo bajo la seccion "Hardcore
+        # Rewards" del sidebar del admin (verbose_name de RewardsConfig) en
+        # vez de una seccion "Sorteos" aparte al final. El modulo Python
+        # sigue viviendo en la app sorteos; esto solo afecta como jazzmin
+        # lo agrupa visualmente.
+        app_label = 'rewards'
         verbose_name = 'sorteo'
         verbose_name_plural = 'Sorteos'
         ordering = ['-created_at']
@@ -63,6 +69,7 @@ class SorteoWinner(models.Model):
     class Meta:
         managed = False
         db_table = 'sorteos_winner'
+        app_label = 'rewards'
         verbose_name = 'ganador de sorteo'
         verbose_name_plural = 'Ganadores de sorteo'
         ordering = ['-drawn_at']
