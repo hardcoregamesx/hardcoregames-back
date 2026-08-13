@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'users',
     'products',
     'rewards',
+    'sorteos',
 ]
 
 JAZZMIN_SETTINGS = {
