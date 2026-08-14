@@ -78,19 +78,12 @@ class SorteoWinner(models.Model):
         return f'{self.user} — {self.sorteo}'
 
 
-class SorteoOrderBuy(models.Model):
-    """Espejo de solo-lectura de orders_buy (tabla propia de hc-fastapi),
-    usado unicamente para calcular quien califica al ejecutar un sorteo.
-    No se usa para crear/editar ordenes desde Django."""
-
-    id_order = models.AutoField(primary_key=True, db_column='id_order')
-    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, db_column='user_id', related_name='+')
-    status = models.CharField(max_length=50)
-    amount = models.IntegerField(null=True, blank=True)
-    created_at = models.DateTimeField()
-
-    class Meta:
-        managed = False
-        db_table = 'orders_buy'
-        verbose_name = 'orden (solo lectura)'
-        verbose_name_plural = 'Órdenes (solo lectura)'
+# --------------------------------------------------------------------- #
+#  Nota: la calificacion de participantes NO se calcula contra           #
+#  orders_buy (tabla de hc-fastapi). Esa tabla resulto estar casi         #
+#  vacia en produccion (7 filas totales, la ultima de abril 2026) y su   #
+#  campo amount nunca se llena. La compra real del storefront se         #
+#  registra en products.models.SaleDetail (creada por confirm_sale en    #
+#  products/views.py), con el precio en GameDetail.precio /               #
+#  precio_descuento via SaleDetail.combinacion. Ver sorteos/admin.py.     #
+# --------------------------------------------------------------------- #

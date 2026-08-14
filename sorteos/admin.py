@@ -3,10 +3,11 @@ from datetime import datetime, timezone
 
 from django.contrib import admin, messages
 from django.contrib.auth.models import User
-from django.db.models import Count, Sum
+from django.db.models import Case, Count, F, IntegerField, Sum, When
 from django.utils.html import format_html, format_html_join
 
-from .models import Sorteo, SorteoOrderBuy, SorteoWinner
+from products.models import SaleDetail
+from .models import Sorteo, SorteoWinner
 
 
 class SorteoWinnerInline(admin.TabularInline):
@@ -36,25 +37,50 @@ STATUS_PARTICIPA = 'Participa'
 STATUS_PARCIAL = 'Parcial'
 
 
+# Precio efectivo de una venta: precio_descuento cuando esta configurado
+# (>0), si no el precio de lista. Mismo criterio que
+# SerializerForGameDetailByProduct.get_price en products/productSerializers.py.
+_EFFECTIVE_PRICE = Case(
+    When(combinacion__precio_descuento__gt=0, then=F('combinacion__precio_descuento')),
+    default=F('combinacion__precio'),
+    output_field=IntegerField(),
+)
+
+
 def _participation_rows(sorteo):
-    """Filas de orders_buy agrupadas por usuario con al menos una compra
-    completada dentro de la ventana del sorteo, con su estado de
+    """Filas de products_saledetail (la compra real del storefront, creada
+    por confirm_sale en products/views.py) agrupadas por usuario con al
+    menos una venta dentro de la ventana del sorteo, con su estado de
     participacion: "Participa" si ya cumple los requisitos (mismo calculo que
-    usa hc-fastapi en app/services/sorteos.py), "Parcial" si tiene compras en
-    el sorteo pero todavia no los cumple. Los usuarios sin ninguna compra en
-    la ventana ("No participa") ni siquiera aparecen en orders_buy filtrado,
-    asi que no hace falta excluirlos aparte: cualquier fila que devuelve esta
-    funcion ya es "distinta de No participa"."""
+    usa hc-fastapi en app/services/sorteos.py para el banner del frontend),
+    "Parcial" si tiene compras en el sorteo pero todavia no los cumple. Los
+    usuarios sin ninguna compra en la ventana ("No participa") ni siquiera
+    aparecen aqui, asi que no hace falta excluirlos aparte: cualquier fila
+    que devuelve esta funcion ya es "distinta de No participa".
+
+    OJO: no se calcula contra orders_buy/SorteoOrderBuy (tabla de
+    hc-fastapi) -- esa tabla esta practicamente vacia en produccion y su
+    campo amount nunca se llena. Ver la nota en sorteos/models.py."""
     rows = (
-        SorteoOrderBuy.objects
-        .filter(status='completed', created_at__gte=sorteo.start_date, created_at__lte=sorteo.end_date)
-        .values('user_id')
-        .annotate(purchases_count=Count('id_order'), amount_sum=Sum('amount'))
+        SaleDetail.objects
+        .filter(
+            usuario_id__isnull=False,
+            combinacion_id__isnull=False,
+            fecha_venta__gte=sorteo.start_date,
+            fecha_venta__lte=sorteo.end_date,
+        )
+        .values('usuario_id')
+        .annotate(purchases_count=Count('id_sale_detail'), amount_sum=Sum(_EFFECTIVE_PRICE))
     )
     result = []
     for row in rows:
         qualifies = _qualifies(row['purchases_count'], row['amount_sum'], sorteo)
-        result.append({**row, 'status': STATUS_PARTICIPA if qualifies else STATUS_PARCIAL})
+        result.append({
+            'user_id': row['usuario_id'],
+            'purchases_count': row['purchases_count'],
+            'amount_sum': row['amount_sum'],
+            'status': STATUS_PARTICIPA if qualifies else STATUS_PARCIAL,
+        })
     return result
 
 
