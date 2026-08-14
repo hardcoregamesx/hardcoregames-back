@@ -80,10 +80,10 @@ class SorteoWinner(models.Model):
 
 # --------------------------------------------------------------------- #
 #  Nota: la calificacion de participantes NO se calcula contra           #
-#  orders_buy (tabla de hc-fastapi). Esa tabla resulto estar casi         #
-#  vacia en produccion (7 filas totales, la ultima de abril 2026) y su   #
-#  campo amount nunca se llena. La compra real del storefront se         #
-#  registra en products.models.SaleDetail (creada por confirm_sale en    #
-#  products/views.py), con el precio en GameDetail.precio /               #
-#  precio_descuento via SaleDetail.combinacion. Ver sorteos/admin.py.     #
+#  orders_buy (tabla de hc-fastapi, practicamente vacia en produccion)   #
+#  ni contra products_saledetail (la compra real, pero sin monto). Se     #
+#  calcula contra products.models.Transactions -- el dinero real          #
+#  cobrado via Bold/ePayco, con user_id y amount directos. Una "compra"   #
+#  es una transaccion (un checkout), no una linea de producto: un         #
+#  carrito con 2 productos es 1 compra, no 2. Ver sorteos/admin.py.       #
 # --------------------------------------------------------------------- #
