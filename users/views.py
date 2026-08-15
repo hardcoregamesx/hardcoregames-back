@@ -22,7 +22,7 @@ from utils.joinModels import JoinModels
 
 def get_all_users(request):
     all_users = User.objects.all()
-    response = serializers.serialize("json", all_users)
+    response = serializers.serialize("json", all_users, fields=('id', 'username', 'first_name', 'last_name', 'email', 'is_active', 'is_staff', 'is_superuser', 'date_joined', 'last_login'))
     payload = {'message': 'proceso exitoso', 'response': json.loads(response), 'code': '00', 'status': 200}
 
     return HttpResponse(JsonResponse(payload), content_type='application/json')
@@ -35,7 +35,7 @@ def get_user_by_email(request, self=None):
         email = body['email']
         user_selected = User.objects.filter(username=email)
         if user_selected.exists():
-            user_customized_selected = User_Customized.objects.filter(username=email)
+            user_customized_selected = User_Customized.objects.filter(user__username=email)
             models_joined = JoinModels.__int__(self, user_selected, user_customized_selected)
             payload = {"fields": models_joined, 'message': 'proceso exitoso', 'code': '00', 'status': 200}
             return HttpResponse(JsonResponse({'data': payload}), content_type='application/json')
