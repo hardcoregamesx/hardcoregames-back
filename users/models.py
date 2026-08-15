@@ -7,3 +7,4 @@ class User_Customized(models.Model):
     phone_number = models.CharField(max_length=20)
     avatar = models.CharField(max_length=500, default="")
     puntos = models.IntegerField(default=0)
+    is_guest_account = models.BooleanField(default=False)

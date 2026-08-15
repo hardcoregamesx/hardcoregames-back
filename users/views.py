@@ -76,6 +76,7 @@ def register(request, self=None):
         password = body.get('password', '')
         phone_number = body.get('phone_number', '')
         avatar = body.get('avatar', '')
+        guest_checkout = bool(body.get('guest_checkout', False))
 
         email = (email or '').strip()
         try:
@@ -90,8 +91,44 @@ def register(request, self=None):
                 JsonResponse({'message': 'la contrasena debe tener al menos 8 caracteres', "status": 400, "code": "01"}),
                 content_type="application/json", status=400)
 
-        exist_user = User.objects.filter(username=email).exists()
-        if exist_user:
+        existing_user = User.objects.filter(username=email).first()
+        if existing_user:
+            existing_profile = User_Customized.objects.filter(user_id=existing_user.id).first()
+            is_guest_account = bool(existing_profile and existing_profile.is_guest_account)
+
+            if guest_checkout and is_guest_account:
+                # Segunda compra como invitado con el mismo correo: se rota la
+                # contraseña técnica (el cliente nunca la ve) para que el login
+                # inmediato del checkout funcione, sin tocar nombre ni perfil.
+                existing_user.set_password(password)
+                existing_user.save()
+                return HttpResponse(JsonResponse({'message': 'usuario registrado exitosamente', "status": 200,
+                                                  "code": "00", "user_id": existing_user.id}),
+                                    content_type="application/json")
+
+            if (not guest_checkout) and is_guest_account:
+                # Formulario real de registro sobre una cuenta creada por el
+                # checkout de invitado: se "reclama" en vez de rechazar, pero
+                # solo si el correo ya probó ser suyo (paso de verificación
+                # por código, ver validate_email_token) en los últimos 30 min.
+                if not cache.get(f"email_verified:{email}"):
+                    return HttpResponse(
+                        JsonResponse({'message': 'verifica tu correo primero', "status": 400, "code": "01"}),
+                        content_type="application/json", status=400)
+                existing_user.first_name = first_name
+                existing_user.last_name = last_name
+                existing_user.set_password(password)
+                existing_user.save()
+                if existing_profile:
+                    existing_profile.is_guest_account = False
+                    if phone_number:
+                        existing_profile.phone_number = phone_number
+                    existing_profile.save()
+                cache.delete(f"email_verified:{email}")
+                return HttpResponse(JsonResponse({'message': 'usuario registrado exitosamente', "status": 200,
+                                                  "code": "00", "user_id": existing_user.id}),
+                                    content_type="application/json")
+
             return HttpResponse(
                 JsonResponse({'message': 'ya existe un usuario con este email', "status": 400, "code": "01"}),
                 content_type="application/json", status=400)
@@ -107,7 +144,8 @@ def register(request, self=None):
         last_user_id = User.objects.last().id
         user_customized = User_Customized(user_id=last_user_id,
                                           phone_number=phone_number,
-                                          avatar=avatar
+                                          avatar=avatar,
+                                          is_guest_account=guest_checkout
                                           )
         user_customized.save()
         return HttpResponse(JsonResponse({'message': 'usuario registrado exitosamente', "status": 200,
@@ -255,11 +293,17 @@ def create_email_validation_token(request, self=None):
                 JsonResponse({'message': 'debes indicar un email valido', "status": 200, "code": "01"}),
                 content_type="application/json")
 
-        exist_user = User.objects.filter(username=username).exists()
-        if exist_user:
-            return HttpResponse(
-                JsonResponse({'message': 'ya existe un usuario con este email', "status": 200, "code": "01"}),
-                content_type="application/json")
+        existing_user = User.objects.filter(username=username).first()
+        if existing_user:
+            existing_profile = User_Customized.objects.filter(user_id=existing_user.id).first()
+            is_guest_account = bool(existing_profile and existing_profile.is_guest_account)
+            # Una cuenta creada por el checkout de invitado no cuenta como
+            # "ya registrado" para el formulario real: se deja seguir el
+            # flujo de verificación normal, como si el correo fuera nuevo.
+            if not is_guest_account:
+                return HttpResponse(
+                    JsonResponse({'message': 'ya existe un usuario con este email', "status": 200, "code": "01"}),
+                    content_type="application/json")
 
         subject_email = settings.SUBJECT_EMAIL_FOR_CONFIRMATION
         text_email = settings.TEMPLATE_FOR_EMAIL_CONFIRMATION or ""
@@ -308,6 +352,11 @@ def validate_email_token(request, self=None):
         cache.delete(token_key)
         user_key = f"email_validation_user:{username}"
         cache.delete(user_key)
+
+        # Marca corta de "este correo probó ser suyo" — la exige register()
+        # para dejar reclamar una cuenta de checkout de invitado sobre este
+        # email, evitando que alguien la tome solo con conocer el correo.
+        cache.set(f"email_verified:{username}", True, timeout=1800)
 
         return HttpResponse(
             JsonResponse({'message': 'token válido', "status": 200, "code": "00"}),
