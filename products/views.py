@@ -37,6 +37,7 @@ import hashlib
 import logging
 import base64
 import hmac
+import secrets
 import threading
 
 logger = logging.getLogger(__name__)
@@ -1252,21 +1253,23 @@ def confirm_sale_bold(request):
         return JsonResponse({"error": "Missing required fields"}, status=400)
 
     transaction = Transactions.objects.filter(ref_payco=order_id).first()
-    if transaction:
-        previous_status = transaction.status
-        transaction.status = status
-        transaction.save()
-        if previous_status not in ("approved", "SALE_APPROVED") and status == "approved":
-            confirm_sale(transaction.request)
-            return redirect(settings.CONFIRMATION_URL)
-        elif status in ("failed", "SALE_REJECTED"):
-            return redirect(settings.DECLINED_URL)
-        elif status == "pending":
-            return redirect(settings.PENDING_URL)
-        else:
-            return redirect(settings.CONFIRMATION_URL)
+    if not transaction:
+        return JsonResponse({"error": "Transaction not found"}, status=404)
 
-    return JsonResponse({"error": "Transaction not found"}, status=404)
+    # Este endpoint es el retorno del navegador: el query string lo controla
+    # quien tenga el link, sin firma. NUNCA confirmar la venta ni entregar
+    # llaves a partir de "status" aquí — eso es responsabilidad exclusiva de
+    # bold_webhook/process_bold_event, que sí verifica HMAC. Aquí solo se
+    # decide a qué pantalla mandar al navegador, leyendo el estado real que
+    # ya haya escrito el webhook.
+    real_status = transaction.status
+    if real_status in ("approved", "SALE_APPROVED"):
+        return redirect(settings.CONFIRMATION_URL)
+    if real_status in ("failed", "SALE_REJECTED", "rejected"):
+        return redirect(settings.DECLINED_URL)
+
+    pending_url = getattr(settings, 'PENDING_URL', None) or settings.CONFIRMATION_URL
+    return redirect(pending_url)
 
 
 @csrf_exempt
@@ -1326,7 +1329,11 @@ def process_bold_event(data):
 
     transaction = Transactions.objects.filter(ref_payco=transaction_id).first()
 
-    if (transaction and transaction.status not in ("approved", "SALE_APPROVED") and
+    if not transaction:
+        logger.warning("bold event para una referencia desconocida: %s", transaction_id)
+        return
+
+    if (transaction.status not in ("approved", "SALE_APPROVED") and
         event_type == "SALE_APPROVED"):
 
         logger.info("Processing SALE_APPROVED event for transaction: %s", transaction_id)
@@ -1364,15 +1371,81 @@ def generate_hash_bold(request):
         return JsonResponse({"error": "Missing required fields"}, status=400)
 
     try:
-        balance_applied = int(json.loads(request_transaction).get('balanceApplied') or 0)
-    except (json.JSONDecodeError, TypeError, ValueError):
+        parsed_transaction = json.loads(request_transaction)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "request_transaction inválido"}, status=400)
+
+    user_id = parsed_transaction.get('id_user')
+    cart_data = parsed_transaction.get('data') or []
+    if not user_id or not cart_data:
+        return JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400)
+
+    # El precio, el cupón y el saldo NUNCA se toman de lo que declara el
+    # cliente — se recalculan aquí a partir del catálogo real, y el amount
+    # recibido solo se usa para comparar. Lo que se firma y se guarda es
+    # siempre el monto calculado en el servidor.
+    combination_ids = [item.get('id_combination') for item in cart_data]
+    if not all(combination_ids):
+        return JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400)
+
+    game_details = {
+        gd.id_game_detail: gd
+        for gd in GameDetail.objects.filter(pk__in=combination_ids)
+    }
+    if len(game_details) != len(set(combination_ids)):
+        return JsonResponse({"error": "Uno o más productos ya no existen"}, status=400)
+
+    cart_items = []
+    calculated_subtotal = 0
+    for combo_id in combination_ids:
+        gd = game_details[combo_id]
+        unit_price = gd.precio_descuento if 0 < gd.precio_descuento < gd.precio else gd.precio
+        calculated_subtotal += unit_price
+        cart_items.append({
+            'id_combination': combo_id,
+            'quantity': 1,
+            'category_id': gd.producto_id,
+        })
+
+    calculated_amount = calculated_subtotal
+
+    coupon_code = parsed_transaction.get('couponCode')
+    if coupon_code:
+        user = User.objects.filter(pk=user_id).first()
+        coupon = Coupon.objects.filter(name_coupon__iexact=coupon_code).first()
+        if not user or not coupon:
+            return JsonResponse({"error": "Cupón inválido"}, status=400)
+
+        is_valid, reason = coupon.validate_coupon(user, calculated_subtotal, cart_items)
+        if not is_valid:
+            return JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400)
+
+        eligible_ids = set(coupon.game_details.values_list('id_game_detail', flat=True))
+        eligible_total = sum(
+            game_details[i['id_combination']].precio_descuento
+            if 0 < game_details[i['id_combination']].precio_descuento < game_details[i['id_combination']].precio
+            else game_details[i['id_combination']].precio
+            for i in cart_items
+            if not eligible_ids or i['id_combination'] in eligible_ids
+        )
+
+        discount = 0
+        if coupon.discount_type == 'FIXED_AMOUNT' and coupon.fixed_amount > 0:
+            discount = min(coupon.fixed_amount, eligible_total)
+        elif coupon.percentage_off and coupon.percentage_off > 0:
+            discount = round(eligible_total * coupon.percentage_off / 100)
+
+        calculated_amount = max(calculated_subtotal - discount, 0)
+
+    try:
+        balance_applied = int(parsed_transaction.get('balanceApplied') or 0)
+    except (TypeError, ValueError):
         balance_applied = 0
 
     if balance_applied < 0:
         return JsonResponse({"error": "balanceApplied inválido"}, status=400)
 
     if balance_applied > 0:
-        user_id = json.loads(request_transaction)['id_user']
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT balance_exchange FROM users_user_customized WHERE user_id = %s",
@@ -1382,11 +1455,24 @@ def generate_hash_bold(request):
         current_balance = row[0] if row else 0
         if balance_applied > current_balance:
             return JsonResponse({"error": "Saldo insuficiente"}, status=400)
+        calculated_amount = max(calculated_amount - balance_applied, 0)
+
+    try:
+        received_amount = int(amount)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "amount inválido"}, status=400)
+
+    if received_amount != calculated_amount:
+        logger.warning(
+            "generate_hash_bold: monto no coincide (recibido=%s calculado=%s user_id=%s)",
+            received_amount, calculated_amount, user_id,
+        )
+        return JsonResponse({"error": "El monto no coincide con el carrito"}, status=400)
 
     order_id = generate_order_id()
-    signature = generate_signature(order_id, amount, currency, settings.SECRET_KEY_BOLD)
+    signature = generate_signature(order_id, calculated_amount, currency, settings.SECRET_KEY_BOLD)
 
-    create_transaction_record(order_id, amount, request_transaction)
+    create_transaction_record(order_id, calculated_amount, request_transaction)
 
     payload = build_payload(order_id, signature)
     return JsonResponse(payload, status=200)
@@ -1436,7 +1522,7 @@ def get_lower_price(pk,):
 def generate_order_id():
     now = datetime.datetime.now()
     timestamp = int(now.timestamp() * 1000)
-    order_id = f"inv_{timestamp}"
+    order_id = f"inv_{timestamp}_{secrets.token_hex(8)}"
 
     return order_id
 
