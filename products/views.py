@@ -39,8 +39,32 @@ import base64
 import hmac
 import secrets
 import threading
+import jwt
 
 logger = logging.getLogger(__name__)
+
+
+def _get_verified_jwt_user(request):
+    """Verifica el Bearer token que ya manda el frontend (emitido por
+    FastAPI, mismo auth_user compartido). Devuelve (user_id, is_superuser),
+    o (None, False) si no hay token o no es válido.
+
+    Django y FastAPI usan SECRET_KEY distintos, así que la verificación se
+    hace contra FASTAPI_JWT_SECRET_KEY (copia explícita de ese secreto en el
+    env de Django) en vez de intentar reusar settings.SECRET_KEY.
+    """
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None, False
+    token = auth_header[len('Bearer '):].strip()
+    secret = getattr(settings, 'FASTAPI_JWT_SECRET_KEY', None)
+    if not secret or not token:
+        return None, False
+    try:
+        payload = jwt.decode(token, secret, algorithms=['HS256'])
+    except jwt.InvalidTokenError:
+        return None, False
+    return payload.get('user_id'), bool(payload.get('is_superuser'))
 
 def get_all_products(request):
     if request.method == "GET":
@@ -687,6 +711,12 @@ def get_shopping_car(request):
 
 def sales_by_user(request, id_user):
     if request.method == "GET":
+        token_user_id, is_superuser = _get_verified_jwt_user(request)
+        if token_user_id is None:
+            return JsonResponse({'message': 'no autenticado', 'code': '01', 'status': 401}, status=401)
+        if not is_superuser and token_user_id != id_user:
+            return JsonResponse({'message': 'no autorizado', 'code': '01', 'status': 403}, status=403)
+
         sales_by_user = (SaleDetail.objects.filter(usuario=id_user,
                                                    fecha_vencimiento__gt=now()
                                                    ).order_by('-pk') |
