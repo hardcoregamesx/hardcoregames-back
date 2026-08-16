@@ -258,3 +258,8 @@ LOGGING = {
 SESSION_COOKIE_AGE = 31536000
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_SAVE_EVERY_REQUEST = True
+
+# Mismo secreto de firma de JWT que usa hc-fastapi, copiado bajo otro nombre
+# para verificar en Django (sin llamada de red) el Bearer token que manda
+# el frontend a salesByUser. Ver settings.py para el mismo cambio.
+FASTAPI_JWT_SECRET_KEY = os.getenv("FASTAPI_JWT_SECRET_KEY")
