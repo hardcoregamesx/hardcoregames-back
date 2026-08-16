@@ -203,3 +203,9 @@ TOKEN_CONFIRM_SALE = 'XqYH26xdzLidEFa'
 #Bold Produccion
 API_KEY_BOLD = os.getenv("API_KEY_BOLD")
 SECRET_KEY_BOLD = os.getenv("SECRET_KEY_BOLD")
+
+# Mismo secreto de firma de JWT que usa hc-fastapi (SECRET_KEY ahi), copiado
+# aqui bajo otro nombre para no pisar el SECRET_KEY propio de Django. Permite
+# verificar en Django, sin llamada de red, el Bearer token que ya manda el
+# frontend a endpoints como salesByUser.
+FASTAPI_JWT_SECRET_KEY = os.getenv("FASTAPI_JWT_SECRET_KEY")
