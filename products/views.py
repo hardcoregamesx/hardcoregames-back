@@ -762,9 +762,9 @@ def system_variables_group(request, variable):
 
 
 @csrf_exempt
-def confirm_sale(request):
+def confirm_sale(request_data):
     try:
-        json_request = json.loads(request)
+        json_request = json.loads(request_data)
         id_user = json_request['id_user']
         coupon_code = json_request.get('couponCode')
         user = User.objects.filter(pk=id_user).first()
@@ -793,7 +793,7 @@ def confirm_sale(request):
                 create_sale(item, id_user, account_selected)
                 message_html += build_div_html(product_selected, combination_selected, account_selected, name_console)
             else:
-                global_exception_handler(request, None)
+                global_exception_handler(request_data, None)
                 return False
 
         order_id = ','.join(str(item['id_combination']) for item in json_request['data'])
@@ -805,7 +805,7 @@ def confirm_sale(request):
         return True
     except Exception as e:
         send_email = True
-        global_exception_handler(request, e, send_email)
+        global_exception_handler(request_data, e, send_email)
         return False
 
 @csrf_exempt
@@ -1001,7 +1001,7 @@ def send_email_notification(user_id, message_html):
     email_to = User.objects.filter(pk=user_id).first().email
     soup = BeautifulSoup(settings.EMAIL_FOR_SALE, features="html.parser")
     extra_soup = BeautifulSoup(message_html, 'html.parser')
-    body = soup.find(id="body")
+    body = soup.find(id="body") or soup
     body.append(extra_soup)
     SendEmail().__int__(str(soup), settings.SUBJECT_EMAIL_FOR_SALE, email_to)
 
@@ -1218,10 +1218,12 @@ def check_for_disable_account(product):
 
     return False
     
-def global_exception_handler(request, exception, send_email=False):
+def global_exception_handler(request_data, exception, send_email=False):
     if send_email:
-        body_unicode = request.body.decode('utf-8')
-        body_data = json.loads(body_unicode)
+        try:
+            body_data = json.loads(request_data)
+        except (TypeError, json.JSONDecodeError):
+            body_data = request_data
         message_html = f"<html><head>Ha ocurrido un error en una compra </head><body>{exception} con el request: <br> {body_data}</body></html>"
         SendEmail().__int__(message_html, "Ha ocurrido un error", settings.FROM_EMAIL)
 
