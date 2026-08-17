@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from ecommerceHardcoregamesBack import settings
+from django.conf import settings
 
 
 class AdapterEpaycoApi:

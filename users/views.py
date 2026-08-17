@@ -12,7 +12,7 @@ from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 
-from ecommerceHardcoregamesBack import settings
+from django.conf import settings
 from users.models import User_Customized
 from users.userSerializer import UserSerializer, UserResponseSerializer, UserCustomSerializer
 from utils.SendEmail import SendEmail

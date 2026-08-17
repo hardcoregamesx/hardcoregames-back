@@ -3,7 +3,7 @@ from email.message import EmailMessage
 import smtplib
 import logging
 
-from ecommerceHardcoregamesBack import settings
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 

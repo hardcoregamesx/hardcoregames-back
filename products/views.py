@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.postgres.search import TrigramSimilarity
 from unidecode import unidecode
 
-from ecommerceHardcoregamesBack import settings
+from django.conf import settings
 from products.AdapterEpaycoApi import AdapterEpaycoApi
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
