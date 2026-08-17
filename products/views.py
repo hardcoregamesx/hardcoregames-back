@@ -1310,12 +1310,17 @@ def bold_webhook(request):
         logger.warning("Invalid request method: %s", request.method)
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
+    # Leer signature y body ANTES de responder: el socket de la request se
+    # cierra apenas la vista retorna, asi que si el hilo de abajo intenta
+    # leer request.body despues de eso, revienta con
+    # "OSError: Bad file descriptor" (UnreadablePostError) y el evento se
+    # pierde en silencio -- Bold ya recibio 200 y no reintenta.
+    signature = request.headers.get("x-bold-signature", "")
+    body = request.body
+
     response = JsonResponse({"message": "Event received successfully"}, status=200)
 
     def process_request():
-        signature = request.headers.get("x-bold-signature", "")
-        body = request.body
-
         logger.error("Request body: %s", body)
         logger.error("Received signature: %s", signature)
 
