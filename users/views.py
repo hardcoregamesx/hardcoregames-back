@@ -253,7 +253,7 @@ def token_pass(request, self=None):
             print(f"Token key: {cache.get(token_key)}, User key: {user_key}")
             SendEmail.__int__(self, text_email, subject_email, username)
             return HttpResponse(
-                JsonResponse({'token': token, "status": 200, "code": "00"}),
+                JsonResponse({'message': 'codigo enviado al correo', "status": 200, "code": "00"}),
                 content_type="application/json")
 
         return HttpResponse(JsonResponse({'message': 'usuario no existe', "status": 200, "code": "01"}),
@@ -328,7 +328,7 @@ def create_email_validation_token(request, self=None):
         SendEmail.__int__(self, text_email, subject_email, username)
 
         return HttpResponse(
-            JsonResponse({'token': token, "status": 200, "code": "00"}),
+            JsonResponse({'message': 'codigo enviado al correo', "status": 200, "code": "00"}),
             content_type="application/json")
 
 
