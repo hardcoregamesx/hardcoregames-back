@@ -196,6 +196,18 @@ def save_or_update_game_detail(id_product, id_console, id_license, duration_days
                                 Q(precio__gt=0) | Q(precio_descuento__gt=0)
                             ).first()
 
+    if not existing_game_detail:
+        # Ninguna cuenta de esta consola exacta tiene precio todavia (p.ej. la
+        # consola quedo mal asignada, como paso con Crunchyroll: MULTI vs xbox).
+        # Antes de resignarse a precio 0, hereda el precio de cualquier otra
+        # cuenta con la misma licencia para este producto.
+        existing_game_detail = GameDetail.objects.filter(
+                                    producto_id=id_product,
+                                    licencia=id_license.first(),
+                                ).filter(
+                                    Q(precio__gt=0) | Q(precio_descuento__gt=0)
+                                ).order_by('-id_game_detail').first()
+
     if existing_game_detail:
         price = existing_game_detail.precio
         offer_price = existing_game_detail.precio_descuento
