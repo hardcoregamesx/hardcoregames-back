@@ -37,4 +37,7 @@ urlpatterns = [
     path("boldWebHook/", views.bold_webhook, name="bold_webhook"),
     path("generateHashBold/", views.generate_hash_bold, name="generate_hash_bold"),
     path("confirmSaleBold/", views.confirm_sale_bold, name="confirm_sale_bold"),
+    path("sistecreditoCreate/", views.sistecredito_create, name="sistecredito_create"),
+    path("sistecreditoWebhook/", views.sistecredito_webhook, name="sistecredito_webhook"),
+    path("confirmSaleSistecredito/", views.confirm_sale_sistecredito, name="confirm_sale_sistecredito"),
 ]

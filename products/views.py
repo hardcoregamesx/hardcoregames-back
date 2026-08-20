@@ -40,6 +40,8 @@ import hmac
 import secrets
 import threading
 import jwt
+import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -1392,45 +1394,31 @@ def process_bold_event(data):
         transaction.save()
 
 @csrf_exempt
-def generate_hash_bold(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
+def _calculate_cart_amount(parsed_transaction):
+    """Recalcula el total del carrito desde el catálogo real (precio, cupón,
+    saldo) -- nunca se toma de lo que declare el cliente. Usada tanto por
+    Bold como por Sistecrédito para que el mismo bug de precio no pueda
+    arreglarse en un lado y seguir abierto en el otro.
 
-    data = parse_request_data(request)
-    if not data:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    amount = data.get('amount')
-    currency = data.get('currency')
-    request_transaction = data.get('request_transaction')
-
-    if not all([amount, currency, request_transaction]):
-        return JsonResponse({"error": "Missing required fields"}, status=400)
-
-    try:
-        parsed_transaction = json.loads(request_transaction)
-    except (json.JSONDecodeError, TypeError):
-        return JsonResponse({"error": "request_transaction inválido"}, status=400)
-
+    Devuelve (user_id, calculated_amount, cart_items, error_response). Si
+    algo no cuadra, error_response es un JsonResponse listo para devolver y
+    los demás valores son None.
+    """
     user_id = parsed_transaction.get('id_user')
     cart_data = parsed_transaction.get('data') or []
     if not user_id or not cart_data:
-        return JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400)
+        return None, None, None, JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400)
 
-    # El precio, el cupón y el saldo NUNCA se toman de lo que declara el
-    # cliente — se recalculan aquí a partir del catálogo real, y el amount
-    # recibido solo se usa para comparar. Lo que se firma y se guarda es
-    # siempre el monto calculado en el servidor.
     combination_ids = [item.get('id_combination') for item in cart_data]
     if not all(combination_ids):
-        return JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400)
+        return None, None, None, JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400)
 
     game_details = {
         gd.id_game_detail: gd
         for gd in GameDetail.objects.filter(pk__in=combination_ids)
     }
     if len(game_details) != len(set(combination_ids)):
-        return JsonResponse({"error": "Uno o más productos ya no existen"}, status=400)
+        return None, None, None, JsonResponse({"error": "Uno o más productos ya no existen"}, status=400)
 
     cart_items = []
     calculated_subtotal = 0
@@ -1451,11 +1439,11 @@ def generate_hash_bold(request):
         user = User.objects.filter(pk=user_id).first()
         coupon = Coupon.objects.filter(name_coupon__iexact=coupon_code).first()
         if not user or not coupon:
-            return JsonResponse({"error": "Cupón inválido"}, status=400)
+            return None, None, None, JsonResponse({"error": "Cupón inválido"}, status=400)
 
         is_valid, reason = coupon.validate_coupon(user, calculated_subtotal, cart_items)
         if not is_valid:
-            return JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400)
+            return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400)
 
         eligible_ids = set(coupon.game_details.values_list('id_game_detail', flat=True))
         eligible_total = sum(
@@ -1480,7 +1468,7 @@ def generate_hash_bold(request):
         balance_applied = 0
 
     if balance_applied < 0:
-        return JsonResponse({"error": "balanceApplied inválido"}, status=400)
+        return None, None, None, JsonResponse({"error": "balanceApplied inválido"}, status=400)
 
     if balance_applied > 0:
         with connection.cursor() as cursor:
@@ -1491,8 +1479,35 @@ def generate_hash_bold(request):
             row = cursor.fetchone()
         current_balance = row[0] if row else 0
         if balance_applied > current_balance:
-            return JsonResponse({"error": "Saldo insuficiente"}, status=400)
+            return None, None, None, JsonResponse({"error": "Saldo insuficiente"}, status=400)
         calculated_amount = max(calculated_amount - balance_applied, 0)
+
+    return user_id, calculated_amount, cart_items, None
+
+
+def generate_hash_bold(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    data = parse_request_data(request)
+    if not data:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    amount = data.get('amount')
+    currency = data.get('currency')
+    request_transaction = data.get('request_transaction')
+
+    if not all([amount, currency, request_transaction]):
+        return JsonResponse({"error": "Missing required fields"}, status=400)
+
+    try:
+        parsed_transaction = json.loads(request_transaction)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "request_transaction inválido"}, status=400)
+
+    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    if error_response:
+        return error_response
 
     try:
         received_amount = int(amount)
@@ -1567,3 +1582,270 @@ def get_lowest_price_by_product(product_id):
     lowest_price = (GameDetail.objects.filter(producto_id=product_id, stock__gt=0, precio__gt=0)
                     .aggregate(Min('precio')))
     return lowest_price['precio__min'] or 0
+
+
+# ---------------------------------------------------------------------------
+# Sistecrédito ("CrediNet" pasarela de créditos) -- ver memoria
+# sistecredito-api-contrato-tecnico para el contrato completo. A diferencia
+# de Bold, esta pasarela no firma sus notificaciones: la única manera de
+# confiar en una notificación es re-consultar GetTransactionResponse y
+# comparar, tal como indica su propia guía de integración.
+# ---------------------------------------------------------------------------
+
+SISTECREDITO_BASE_URL = "https://api.credinet.co/pay"
+SISTECREDITO_PAYMENT_METHOD_ID = 2
+SISTECREDITO_SURCHARGE_MULTIPLIER = 1.20
+SISTECREDITO_TERMINAL_STATUSES = {"Rejected", "Cancelled", "Expired", "Abandoned", "Failed"}
+
+
+def _sistecredito_headers():
+    return {
+        "Content-Type": "application/json",
+        "SCLocation": "0,0",
+        "SCOrigen": "Production",
+        "country": "co",
+        "Ocp-Apim-Subscription-Key": os.getenv("SISTECREDITO_SUBSCRIPTION_KEY", ""),
+        "ApplicationKey": os.getenv("SISTECREDITO_STORE_ID", ""),
+        "ApplicationToken": os.getenv("SISTECREDITO_VENDOR_ID", ""),
+    }
+
+
+@csrf_exempt
+def sistecredito_create(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    data = parse_request_data(request)
+    if not data:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    request_transaction = data.get('request_transaction')
+    doc_type = (data.get('docType') or '').strip().upper()
+    document = (data.get('document') or '').strip()
+
+    if not request_transaction or not doc_type or not document:
+        return JsonResponse({"error": "Faltan datos del carrito o del documento de identidad"}, status=400)
+
+    try:
+        parsed_transaction = json.loads(request_transaction)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "request_transaction inválido"}, status=400)
+
+    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    if error_response:
+        return error_response
+
+    # Recargo exclusivo de este medio de pago. Se aplica aquí, sobre el
+    # monto ya recalculado del catálogo -- nunca se toca el precio mostrado
+    # en el resto de la tienda ni en otros métodos de pago.
+    sistecredito_amount = round(calculated_amount * SISTECREDITO_SURCHARGE_MULTIPLIER)
+
+    order_id = generate_order_id()
+
+    transaction = Transactions.objects.create(
+        status="pendiente",
+        amount=sistecredito_amount,
+        payment_id="sistecredito",
+        ref_payco="",
+        id_invoice=order_id,
+        request=request_transaction,
+        user_id=User.objects.filter(pk=user_id).first(),
+    )
+
+    sandbox_active = os.getenv("SISTECREDITO_SANDBOX", "false").strip().lower() == "true"
+
+    body = {
+        "invoice": order_id,
+        "description": "Compra Hardcore Games",
+        "paymentMethod": {"paymentMethodId": SISTECREDITO_PAYMENT_METHOD_ID},
+        "currency": "COP",
+        "value": sistecredito_amount,
+        "sandbox": {"isActive": sandbox_active, "status": "Approved"},
+        "urlResponse": os.getenv("SISTECREDITO_URL_RESPONSE", "https://www.hardcoregames.co/purchases"),
+        "urlConfirmation": os.getenv(
+            "SISTECREDITO_URL_CONFIRMATION",
+            "https://admin.hardcoregames.co/products/sistecreditoWebhook/",
+        ),
+        "methodConfirmation": "POST",
+        "client": {"docType": doc_type, "document": document},
+    }
+
+    try:
+        response = requests.post(
+            f"{SISTECREDITO_BASE_URL}/create",
+            json=body,
+            headers=_sistecredito_headers(),
+            timeout=15,
+        )
+        response_data = response.json()
+    except (requests.RequestException, ValueError):
+        logger.exception("sistecredito_create: fallo al conectar con Sistecrédito")
+        transaction.status = "failed"
+        transaction.save()
+        return JsonResponse({"error": "No se pudo conectar con Sistecrédito"}, status=502)
+
+    if response.status_code != 200 or response_data.get("errorCode"):
+        logger.warning("sistecredito_create: pasarela rechazó la creación: %s", response_data)
+        transaction.status = "failed"
+        transaction.save()
+        return JsonResponse(
+            {"error": response_data.get("message", "Sistecrédito rechazó la transacción")}, status=400
+        )
+
+    sistecredito_id = response_data.get("data", {}).get("_id")
+    if not sistecredito_id:
+        transaction.status = "failed"
+        transaction.save()
+        return JsonResponse({"error": "Respuesta inesperada de Sistecrédito"}, status=502)
+
+    transaction.ref_payco = sistecredito_id
+    transaction.save()
+
+    payment_redirect_url = _sistecredito_poll_redirect_url(sistecredito_id)
+    if not payment_redirect_url:
+        # No es un error: Sistecrédito puede tardar un poco más en entregar
+        # la URL. El frontend debe reintentar la consulta contra
+        # confirmSaleSistecredito o volver a golpear este endpoint con el
+        # transactionId ya conocido -- por ahora solo se expone el id.
+        return JsonResponse({
+            "transactionId": sistecredito_id,
+            "paymentRedirectUrl": None,
+            "message": "Sistecrédito está procesando el intento, reintenta en unos segundos",
+        }, status=202)
+
+    return JsonResponse({
+        "transactionId": sistecredito_id,
+        "paymentRedirectUrl": payment_redirect_url,
+    }, status=200)
+
+
+def _sistecredito_poll_redirect_url(sistecredito_id, attempts=6, delay_seconds=1.5):
+    """GetTransactionResponse no entrega paymentRedirectUrl en el primer
+    intento -- hay que hacer polling corto, tal como indica la guía oficial
+    de Sistecrédito. Devuelve la URL, o None si llegó a un estado terminal
+    de fallo o se agotaron los intentos.
+    """
+    for _ in range(attempts):
+        try:
+            response = requests.get(
+                f"{SISTECREDITO_BASE_URL}/GetTransactionResponse",
+                params={"transactionId": sistecredito_id},
+                headers=_sistecredito_headers(),
+                timeout=10,
+            )
+            response_data = response.json()
+        except (requests.RequestException, ValueError):
+            logger.exception("sistecredito poll: fallo consultando GetTransactionResponse")
+            return None
+
+        payment_response = response_data.get("data", {}).get("paymentMethodResponse", {}) or {}
+        redirect_url = payment_response.get("paymentRedirectUrl")
+        status_response = payment_response.get("statusResponse")
+
+        if redirect_url:
+            return redirect_url
+        if status_response in SISTECREDITO_TERMINAL_STATUSES:
+            return None
+
+        time.sleep(delay_seconds)
+
+    return None
+
+
+def confirm_sale_sistecredito(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    sistecredito_id = request.GET.get('paymentRef')
+    if not sistecredito_id:
+        return JsonResponse({"error": "Missing required fields"}, status=400)
+
+    transaction = Transactions.objects.filter(ref_payco=sistecredito_id, payment_id="sistecredito").first()
+    if not transaction:
+        return JsonResponse({"error": "Transaction not found"}, status=404)
+
+    # Igual que confirm_sale_bold: este es el retorno del navegador, sin
+    # firma. Solo lee el estado que ya haya escrito sistecredito_webhook
+    # tras re-verificar -- nunca aprueba nada desde aquí.
+    if transaction.status == "approved":
+        return redirect(settings.CONFIRMATION_URL)
+    if transaction.status == "failed":
+        return redirect(settings.DECLINED_URL)
+
+    pending_url = getattr(settings, 'PENDING_URL', None) or settings.CONFIRMATION_URL
+    return redirect(pending_url)
+
+
+@csrf_exempt
+def sistecredito_webhook(request):
+    logger.info("Received a request at sistecredito_webhook")
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    # Igual que bold_webhook: leer el body ANTES de responder, porque el
+    # socket se cierra apenas la vista retorna y el hilo de abajo reventaría
+    # con "Bad file descriptor" si intentara leerlo después.
+    body = request.body
+
+    response = JsonResponse({"message": "Event received successfully"}, status=200)
+
+    def process_request():
+        try:
+            notified_data = json.loads(body)
+        except json.JSONDecodeError:
+            logger.error("sistecredito_webhook: body no es JSON válido")
+            return
+
+        sistecredito_id = notified_data.get("_id")
+        if not sistecredito_id:
+            logger.warning("sistecredito_webhook: notificación sin _id")
+            return
+
+        # Sistecrédito no firma sus notificaciones. Su propia guía recomienda
+        # re-consultar directamente con ellos y comparar antes de confiar en
+        # el body recibido -- nunca se aprueba una venta solo porque llegó un
+        # POST con el shape correcto.
+        try:
+            verify_response = requests.get(
+                f"{SISTECREDITO_BASE_URL}/GetTransactionResponse",
+                params={"transactionId": sistecredito_id},
+                headers=_sistecredito_headers(),
+                timeout=10,
+            )
+            verified_data = verify_response.json().get("data", {}) or {}
+        except (requests.RequestException, ValueError):
+            logger.exception("sistecredito_webhook: fallo verificando con GetTransactionResponse")
+            return
+
+        if verified_data.get("_id") != sistecredito_id:
+            logger.error("sistecredito_webhook: la verificación no coincide para %s", sistecredito_id)
+            return
+
+        process_sistecredito_event(verified_data)
+
+    threading.Thread(target=process_request).start()
+
+    return response
+
+
+def process_sistecredito_event(verified_data):
+    sistecredito_id = verified_data.get("_id")
+    transaction_status = verified_data.get("transactionStatus")
+
+    transaction = Transactions.objects.filter(ref_payco=sistecredito_id, payment_id="sistecredito").first()
+    if not transaction:
+        logger.warning("sistecredito event para una referencia desconocida: %s", sistecredito_id)
+        return
+
+    if transaction.status == "approved":
+        logger.info("sistecredito: transacción ya estaba aprobada: %s", sistecredito_id)
+        return
+
+    if transaction_status == "Approved":
+        transaction.status = "approved"
+        transaction.save()
+        confirm_sale(transaction.request)
+    elif transaction_status in SISTECREDITO_TERMINAL_STATUSES:
+        transaction.status = "failed"
+        transaction.save()
