@@ -1684,7 +1684,11 @@ def sistecredito_create(request):
         transaction.save()
         return JsonResponse({"error": "No se pudo conectar con Sistecrédito"}, status=502)
 
-    if response.status_code != 200 or response_data.get("errorCode"):
+    # /pay/create responde HTTP 201 en éxito (no 200 pese a lo que sugieren
+    # las capturas de la guía, que son de otro endpoint) -- la señal real de
+    # éxito/error es el campo errorCode del body, igual que documentan sus
+    # propios ejemplos de error (errorCode 400/738/etc va dentro del JSON).
+    if not response.ok or response_data.get("errorCode", 0) != 0:
         logger.warning("sistecredito_create: pasarela rechazó la creación: %s", response_data)
         transaction.status = "failed"
         transaction.save()
