@@ -1393,7 +1393,6 @@ def process_bold_event(data):
         transaction.status = event_type
         transaction.save()
 
-@csrf_exempt
 def _calculate_cart_amount(parsed_transaction):
     """Recalcula el total del carrito desde el catálogo real (precio, cupón,
     saldo) -- nunca se toma de lo que declare el cliente. Usada tanto por
@@ -1485,6 +1484,7 @@ def _calculate_cart_amount(parsed_transaction):
     return user_id, calculated_amount, cart_items, None
 
 
+@csrf_exempt
 def generate_hash_bold(request):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
