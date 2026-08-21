@@ -1676,7 +1676,13 @@ def sistecredito_create(request):
     body = {
         "invoice": order_id,
         "description": "Compra Hardcore Games",
-        "paymentMethod": {"paymentMethodId": SISTECREDITO_PAYMENT_METHOD_ID},
+        # userType: 0 persona natural, 1 juridica (G-ALI-08). La guia lo
+        # escribe capitalizado pero la API real exige minusculas: mandar
+        # "PaymentMethodId" devuelve 606 PaymentMethodCannotBeEmpty.
+        "paymentMethod": {
+            "paymentMethodId": SISTECREDITO_PAYMENT_METHOD_ID,
+            "userType": 1 if doc_type == "NIT" else 0,
+        },
         "currency": "COP",
         "value": sistecredito_amount,
         "sandbox": {"isActive": sandbox_active, "status": "Approved"},
@@ -1857,6 +1863,28 @@ def process_sistecredito_event(verified_data):
     transaction_status = verified_data.get("transactionStatus")
 
     transaction = Transactions.objects.filter(ref_payco=sistecredito_id, payment_id="sistecredito").first()
+
+    if not transaction:
+        # /pay/create puede fallar DESPUES de que la pasarela ya creo la
+        # transaccion de su lado (error 709 visto en produccion el 21/08):
+        # en ese caso nunca llegamos a guardar el _id y la notificacion
+        # llegaria huerfana. El invoice si viaja en el body que enviamos, asi
+        # que sirve de segundo enlace. Sin esto, una transaccion aprobada en
+        # esas condiciones se pierde en silencio y el cliente paga sin
+        # recibir nada -- el reflejo exacto de la fuga del sandbox.
+        invoice = verified_data.get("invoice")
+        if invoice:
+            transaction = Transactions.objects.filter(
+                id_invoice=invoice, payment_id="sistecredito"
+            ).first()
+        if transaction and sistecredito_id:
+            transaction.ref_payco = sistecredito_id
+            transaction.save()
+            logger.warning(
+                "sistecredito: notificacion enlazada por invoice %s (el _id %s no estaba guardado)",
+                invoice, sistecredito_id,
+            )
+
     if not transaction:
         logger.warning("sistecredito event para una referencia desconocida: %s", sistecredito_id)
         return
