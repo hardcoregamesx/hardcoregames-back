@@ -1640,6 +1640,25 @@ def sistecredito_create(request):
     # en el resto de la tienda ni en otros métodos de pago.
     sistecredito_amount = round(calculated_amount * SISTECREDITO_SURCHARGE_MULTIPLIER)
 
+    # is_rentail no se le pide al cliente -- se deriva aquí de
+    # duracion_dias_alquiler (no hay otro campo "tipo" en GameDetail). El
+    # widget del checkout arma el carrito leyendo /shopping-car/, cuya
+    # respuesta no trae ese dato; pedírselo al cliente fue justo el bug que
+    # rompió confirm_sale durante las pruebas (KeyError 'is_rentail').
+    rentail_by_combo = {
+        gd.id_game_detail: bool(gd.duracion_dias_alquiler)
+        for gd in GameDetail.objects.filter(pk__in=[i['id_combination'] for i in cart_items])
+    }
+    stored_request = json.dumps({
+        'id_user': user_id,
+        'data': [
+            {'id_combination': item['id_combination'], 'is_rentail': rentail_by_combo[item['id_combination']]}
+            for item in cart_items
+        ],
+        'couponCode': parsed_transaction.get('couponCode'),
+        'balanceApplied': parsed_transaction.get('balanceApplied'),
+    })
+
     order_id = generate_order_id()
 
     transaction = Transactions.objects.create(
@@ -1648,7 +1667,7 @@ def sistecredito_create(request):
         payment_id="sistecredito",
         ref_payco="",
         id_invoice=order_id,
-        request=request_transaction,
+        request=stored_request,
         user_id=User.objects.filter(pk=user_id).first(),
     )
 
