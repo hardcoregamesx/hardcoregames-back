@@ -1746,12 +1746,17 @@ def sistecredito_create(request):
         return JsonResponse({
             "transactionId": sistecredito_id,
             "paymentRedirectUrl": None,
+            "amount": sistecredito_amount,
             "message": "Sistecrédito está procesando el intento, reintenta en unos segundos",
         }, status=202)
 
+    # amount va en la respuesta para que el widget pueda contrastar el total
+    # que le mostró al cliente contra el que de verdad se va a cobrar, y
+    # avisar en vez de redirigir a una cifra distinta de la que vio.
     return JsonResponse({
         "transactionId": sistecredito_id,
         "paymentRedirectUrl": payment_redirect_url,
+        "amount": sistecredito_amount,
     }, status=200)
 
 
