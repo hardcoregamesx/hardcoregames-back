@@ -1620,11 +1620,15 @@ def sistecredito_create(request):
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     request_transaction = data.get('request_transaction')
+    # El documento ya no se le pide al comprador: Sistecrédito lo identifica en
+    # su propia página (paymentRedirectUrl apunta a su login). Mandárselo aquí
+    # lo obliga a validar el crédito de inmediato y devuelve 709 si ese
+    # documento no está registrado -- se rompía antes de poder redirigir.
+    # Se sigue aceptando el campo por compatibilidad con el widget anterior.
     doc_type = (data.get('docType') or '').strip().upper()
-    document = (data.get('document') or '').strip()
 
-    if not request_transaction or not doc_type or not document:
-        return JsonResponse({"error": "Faltan datos del carrito o del documento de identidad"}, status=400)
+    if not request_transaction:
+        return JsonResponse({"error": "Faltan datos del carrito"}, status=400)
 
     try:
         parsed_transaction = json.loads(request_transaction)
@@ -1659,7 +1663,11 @@ def sistecredito_create(request):
         'balanceApplied': parsed_transaction.get('balanceApplied'),
     })
 
-    order_id = generate_order_id()
+    # Sistecrédito solo acepta alfanuméricos y guiones en invoice. Un "_" (o
+    # un ".") hace que /pay/create devuelva 709 con el código original vacío,
+    # un error que no dice nada y que costó una tarde de diagnóstico el
+    # 21/08/2026. generate_order_id() usa "_", que Bold sí acepta.
+    order_id = generate_order_id().replace("_", "-")
 
     transaction = Transactions.objects.create(
         status="pendiente",
@@ -1692,7 +1700,6 @@ def sistecredito_create(request):
             "https://admin.hardcoregames.co/products/sistecreditoWebhook/",
         ),
         "methodConfirmation": "POST",
-        "client": {"docType": doc_type, "document": document},
     }
 
     try:
