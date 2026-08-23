@@ -9,9 +9,9 @@ from django.core.cache import cache
 from django import forms
 from django.db import models
 from django.db.models import Sum
-from django.urls import reverse
+from django.urls import reverse, path
 from django.utils.html import format_html
-from django.shortcuts import redirect
+from django.shortcuts import redirect, get_object_or_404, render
 
 from products.accountProductForm import AccountProductForm, FileForm
 from products.formProducts import ProductsFormCreate
@@ -423,6 +423,7 @@ class ProductAccountsAdmin(admin.ModelAdmin):
     list_filter = ["tipo_cuenta",]
     list_per_page = 10
     inlines = [GameDetailStockInline]
+    readonly_fields = ('agregar_licencia_secundaria',)
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_stock_total=Sum('gamedetail__stock'))
@@ -432,6 +433,127 @@ class ProductAccountsAdmin(admin.ModelAdmin):
         total = obj._stock_total or 0
         color = '#c62828' if total == 0 else '#2e7d32'
         return format_html('<span style="color:{};font-weight:bold;">{}</span>', color, total)
+
+    @staticmethod
+    def _combos_producto_consola(cuenta):
+        return (
+            GameDetail.objects.filter(cuenta=cuenta)
+            .exclude(producto__isnull=True)
+            .exclude(consola__isnull=True)
+            .values_list('producto_id', 'consola_id')
+            .distinct()
+        )
+
+    @classmethod
+    def _combos_sin_secundaria(cls, cuenta):
+        """Combos producto/consola que esta cuenta ya tiene (con cualquier
+        licencia) pero para los que todavia no existe una fila de licencia
+        Secundaria (id_license=2)."""
+        faltantes = []
+        for producto_id, consola_id in cls._combos_producto_consola(cuenta):
+            ya_tiene_secundaria = GameDetail.objects.filter(
+                cuenta=cuenta, producto_id=producto_id, consola_id=consola_id, licencia_id=2,
+            ).exists()
+            if not ya_tiene_secundaria:
+                faltantes.append((producto_id, consola_id))
+        return faltantes
+
+    @staticmethod
+    def _precio_referencia_secundaria(producto_id, consola_id):
+        """Toma el precio de una licencia Secundaria ya existente para ese
+        mismo producto/consola (de cualquier otra cuenta) como referencia."""
+        return (
+            GameDetail.objects.filter(
+                producto_id=producto_id, consola_id=consola_id, licencia_id=2, precio__gt=0,
+            )
+            .order_by('-id_game_detail')
+            .first()
+        )
+
+    @admin.display(description='Agregar licencia Secundaria')
+    def agregar_licencia_secundaria(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        if not self._combos_sin_secundaria(obj):
+            return 'Esta cuenta ya tiene licencia Secundaria para todas sus combinaciones (o no tiene ninguna combinación registrada).'
+        url = reverse('admin:products_productaccounts_agregar_secundaria', args=[obj.pk])
+        return format_html('<a class="button" href="{}">+ Agregar licencia Secundaria</a>', url)
+
+    def get_urls(self):
+        return [
+            path(
+                '<int:object_id>/agregar-secundaria/',
+                self.admin_site.admin_view(self.agregar_secundaria_view),
+                name='products_productaccounts_agregar_secundaria',
+            ),
+        ] + super().get_urls()
+
+    def agregar_secundaria_view(self, request, object_id):
+        cuenta = get_object_or_404(ProductAccounts, pk=object_id)
+        combos = self._combos_sin_secundaria(cuenta)
+
+        filas = []
+        for producto_id, consola_id in combos:
+            producto = Products.objects.filter(id_product=producto_id).first()
+            consola = Consoles.objects.filter(id_console=consola_id).first()
+            referencia = self._precio_referencia_secundaria(producto_id, consola_id)
+            filas.append({
+                'producto_id': producto_id,
+                'consola_id': consola_id,
+                'producto': producto.title if producto else producto_id,
+                'consola': consola.descripcion if consola else consola_id,
+                'referencia': referencia,
+            })
+
+        if request.method == 'POST':
+            creadas = []
+            sin_referencia = []
+            for fila in filas:
+                stock_raw = request.POST.get(f"stock_{fila['producto_id']}_{fila['consola_id']}", '').strip()
+                if not stock_raw:
+                    continue
+                try:
+                    stock = int(stock_raw)
+                except ValueError:
+                    continue
+                if stock <= 0:
+                    continue
+                if fila['referencia'] is None:
+                    sin_referencia.append(f"{fila['producto']} ({fila['consola']})")
+                    continue
+                referencia = fila['referencia']
+                GameDetail.objects.create(
+                    producto_id=fila['producto_id'],
+                    consola_id=fila['consola_id'],
+                    licencia_id=2,
+                    cuenta=cuenta,
+                    duracion_dias_alquiler=referencia.duracion_dias_alquiler,
+                    stock=stock,
+                    precio=referencia.precio,
+                    precio_descuento=referencia.precio_descuento,
+                )
+                creadas.append(f"{fila['producto']} ({fila['consola']}) — stock {stock}, precio {referencia.precio}")
+
+            if creadas:
+                cache.clear()
+                messages.success(request, f"Licencia Secundaria agregada: {', '.join(creadas)}.")
+            if sin_referencia:
+                messages.warning(
+                    request,
+                    f"No se pudo agregar (no hay precio de referencia de Secundaria en el catálogo) para: {', '.join(sin_referencia)}.",
+                )
+            if not creadas and not sin_referencia:
+                messages.info(request, "No se ingresó stock para ninguna combinación, no se creó nada.")
+            return redirect(reverse('admin:products_productaccounts_change', args=[object_id]))
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': f'Agregar licencia Secundaria — {cuenta.cuenta}',
+            'cuenta': cuenta,
+            'filas': filas,
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/products/productaccounts/agregar_secundaria.html', context)
 
 class SalesDetailAdmin(admin.ModelAdmin):
     def producto(obj):
