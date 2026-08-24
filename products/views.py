@@ -1016,7 +1016,7 @@ def build_div_html(product, combination, account_selected, name_console):
     # (ver commit a370c51 en hardcoregames-front, mismo criterio del badge
     # "Multi" del catalogo). Aqui replicamos ese override solo visual.
     if getattr(product, 'type_id_id', None) == 3:
-        name_console = "Multi"
+        name_console = "Multiplataforma"
     return f'''<div style="margin-bottom: 20%;">
                <h3>{product.title}</h3>
                <div style="margin-bottom: auto;">
