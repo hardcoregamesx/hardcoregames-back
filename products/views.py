@@ -1012,6 +1012,13 @@ def build_div_html(product, combination, account_selected, name_console):
     string_pass = account_selected.password
     if string_pass is None:
         string_pass = ""
+    # type_id_id=3 = suscripcion general (Crunchyroll, HBO Max, Flujo TV, etc.):
+    # la consola real de la combinacion sigue siendo una consola fisica (ej.
+    # xbox) a proposito, para que el sistema de precios/admin la reconozca
+    # (ver commit a370c51 en hardcoregames-front, mismo criterio del badge
+    # "Multi" del catalogo). Aqui replicamos ese override solo visual.
+    if getattr(product, 'type_id_id', None) == 3:
+        name_console = "Multiplataforma"
     return f'''<div style="margin-bottom: 20%;">
                <h3>{product.title}</h3>
                <div style="margin-bottom: auto;">
