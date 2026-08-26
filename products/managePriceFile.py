@@ -27,6 +27,39 @@ def last_data_row(sheet, col=1, max_gap=50):
     return last
 
 
+def get_or_create_account_for_product(email, password, tipo_cuenta, duration_days, id_product):
+    """Busca una ProductAccounts reutilizable para este producto puntual.
+
+    `cuenta` (el correo) no es una clave unica global: el mismo correo puede
+    usarse para loguearse en varios servicios (Crunchyroll, Paramount, etc.)
+    con contrasenas distintas. Antes esto se resolvia con
+    update_or_create(cuenta=email), lo que hacia que subir un Excel de un
+    producto nuevo con un correo ya usado en OTRO producto pisara la
+    contrasena de ese otro producto (ambos terminaban apuntando a la misma
+    fila). Por eso aqui solo se reutiliza una cuenta si ya esta ligada a
+    este mismo id_product via GameDetail; si no, se crea una fila nueva.
+    """
+    existing = ProductAccounts.objects.filter(
+        cuenta=email, gamedetail__producto_id=id_product
+    ).first()
+
+    if existing:
+        existing.password = password
+        existing.activa = True
+        existing.tipo_cuenta = tipo_cuenta
+        existing.dias_duracion = duration_days
+        existing.save(update_fields=["password", "activa", "tipo_cuenta", "dias_duracion"])
+        return existing
+
+    return ProductAccounts.objects.create(
+        cuenta=email,
+        password=password,
+        activa=True,
+        tipo_cuenta=tipo_cuenta,
+        dias_duracion=duration_days,
+    )
+
+
 def read_file_ps(sheetPs, id_primaria, id_secundaria):
     id_ps4 = Consoles.objects.filter(descripcion__icontains="playstation 4")
     id_ps5 = Consoles.objects.filter(descripcion__icontains="playstation 5")
@@ -56,14 +89,8 @@ def process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundar
 
         type_account_selected = TypeAccounts.objects.filter(pk=type_account).first()
 
-        account_for_producto, _ = ProductAccounts.objects.update_or_create(
-            cuenta=account.lower(),
-            defaults={
-                "password": password,
-                "activa": True,
-                "tipo_cuenta": type_account_selected,
-                "dias_duracion": duration_days,
-            }
+        account_for_producto = get_or_create_account_for_product(
+            account.lower(), password, type_account_selected, duration_days, id_product
         )
 
         prices = {
@@ -114,14 +141,12 @@ def process_batch_xbx(sheet, start, end, id_xbox, id_code, id_pc, licence_pc, id
             "code": str(sheet.cell(row=i, column=7).value).strip(),
         }
 
-        account_for_producto, _ = ProductAccounts.objects.update_or_create(
-            cuenta=account.lower(),
-            defaults={
-                "password": password,
-                "activa": True,
-                "tipo_cuenta": TypeAccounts.objects.filter(pk=1).first(),
-                "dias_duracion": duration_days,
-            }
+        account_for_producto = get_or_create_account_for_product(
+            account.lower(),
+            password,
+            TypeAccounts.objects.filter(pk=1).first(),
+            duration_days,
+            id_product,
         )
 
         for key, console, license_type in [
@@ -195,18 +220,6 @@ def save_or_update_game_detail(id_product, id_console, id_license, duration_days
                             ).filter(
                                 Q(precio__gt=0) | Q(precio_descuento__gt=0)
                             ).first()
-
-    if not existing_game_detail:
-        # Ninguna cuenta de esta consola exacta tiene precio todavia (p.ej. la
-        # consola quedo mal asignada, como paso con Crunchyroll: MULTI vs xbox).
-        # Antes de resignarse a precio 0, hereda el precio de cualquier otra
-        # cuenta con la misma licencia para este producto.
-        existing_game_detail = GameDetail.objects.filter(
-                                    producto_id=id_product,
-                                    licencia=id_license.first(),
-                                ).filter(
-                                    Q(precio__gt=0) | Q(precio_descuento__gt=0)
-                                ).order_by('-id_game_detail').first()
 
     if existing_game_detail:
         price = existing_game_detail.precio
