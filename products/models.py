@@ -338,6 +338,7 @@ class CouponRule(models.Model):
         USAGE_LIMIT_TOTAL  = 'usage_limit_total',  'Límite de usos totales'
         USAGE_LIMIT_PER_USER = 'usage_limit_per_user', 'Límite de usos por usuario'
         DAY_OF_WEEK        = 'day_of_week',        'Día de la semana'
+        REQUIRES_PRODUCT   = 'requires_product',   'Requiere producto en el carrito'
 
     class Operator(models.TextChoices):
         GTE     = 'gte',     'Mayor o igual (>=)'
@@ -360,7 +361,8 @@ class CouponRule(models.Model):
         help_text=(
             'JSON con la configuración de la regla. Ejemplos: '
             '{"amount": 50000} | {"quantity": 3} | {"categories": [1,2]} | '
-            '{"limit": 5} | {"days": [0,1,2,3,4]} | {"min": 10000, "max": 200000}'
+            '{"limit": 5} | {"days": [0,1,2,3,4]} | {"min": 10000, "max": 200000} | '
+            '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo)'
         ),
     )
 
@@ -475,6 +477,21 @@ class CouponRule(models.Model):
                 day_names    = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
                 allowed_names = ', '.join(day_names[d] for d in allowed_days if 0 <= d <= 6)
                 return False, f'El cupón solo es válido los siguientes días: {allowed_names}.'
+
+        # --- requires_product --------------------------------------------
+        elif rt == self.RuleType.REQUIRES_PRODUCT:
+            required_product_ids = set(v.get('product_ids', []))
+            if not required_product_ids:
+                return True, ''
+            cart_combination_ids = [item.get('id_combination') for item in cart_items if item.get('id_combination')]
+            cart_product_ids = set(
+                GameDetail.objects.filter(id_game_detail__in=cart_combination_ids)
+                .values_list('producto_id', flat=True)
+            )
+            if op == self.Operator.IN:
+                if cart_product_ids & required_product_ids:
+                    return True, ''
+                return False, 'Este cupón requiere que compres uno de los productos exigidos junto con este.'
 
         # Fallback – unknown / unhandled combination passes silently
         return True, ''
