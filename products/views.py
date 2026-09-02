@@ -1451,14 +1451,34 @@ def _calculate_cart_amount(parsed_transaction):
         if not is_valid:
             return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400)
 
+        def _unit_price(combo_id):
+            gd = game_details[combo_id]
+            return gd.precio_descuento if 0 < gd.precio_descuento < gd.precio else gd.precio
+
         eligible_ids = set(coupon.game_details.values_list('id_game_detail', flat=True))
-        eligible_total = sum(
-            game_details[i['id_combination']].precio_descuento
-            if 0 < game_details[i['id_combination']].precio_descuento < game_details[i['id_combination']].precio
-            else game_details[i['id_combination']].precio
-            for i in cart_items
+        eligible_items = [
+            i for i in cart_items
             if not eligible_ids or i['id_combination'] in eligible_ids
-        )
+        ]
+
+        # A coupon can cap how many matching cart items actually receive the
+        # discount (e.g. "buy game A, get ONE of these other games free" —
+        # not every matching game the customer happens to add). Without
+        # this, a coupon restricted to several products discounts every one
+        # of them if the customer adds them all — "buy 1 get unlimited"
+        # instead of "buy 1 get 1". When capped, the cheapest matching items
+        # are discounted first so the customer keeps the best deal while
+        # margin on the rest is protected.
+        max_discounted_items = None
+        for rule in coupon.rules.filter(rule_type='max_discounted_items'):
+            limit = (rule.value or {}).get('limit')
+            if limit is not None:
+                max_discounted_items = int(limit) if max_discounted_items is None else min(max_discounted_items, int(limit))
+
+        if max_discounted_items is not None and len(eligible_items) > max_discounted_items:
+            eligible_items = sorted(eligible_items, key=lambda i: _unit_price(i['id_combination']))[:max_discounted_items]
+
+        eligible_total = sum(_unit_price(i['id_combination']) for i in eligible_items)
 
         discount = 0
         if coupon.discount_type == 'FIXED_AMOUNT' and coupon.fixed_amount > 0:

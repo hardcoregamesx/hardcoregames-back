@@ -339,6 +339,7 @@ class CouponRule(models.Model):
         USAGE_LIMIT_PER_USER = 'usage_limit_per_user', 'Límite de usos por usuario'
         DAY_OF_WEEK        = 'day_of_week',        'Día de la semana'
         REQUIRES_PRODUCT   = 'requires_product',   'Requiere producto en el carrito'
+        MAX_DISCOUNTED_ITEMS = 'max_discounted_items', 'Máximo de ítems con descuento'
 
     class Operator(models.TextChoices):
         GTE     = 'gte',     'Mayor o igual (>=)'
@@ -492,6 +493,14 @@ class CouponRule(models.Model):
                 if cart_product_ids & required_product_ids:
                     return True, ''
                 return False, 'Este cupón requiere que compres uno de los productos exigidos junto con este.'
+
+        # --- max_discounted_items -----------------------------------------
+        # Not an eligibility gate — always passes here. It caps how many
+        # matching cart items actually get the discount; that capping
+        # happens where the price is computed (_calculate_cart_amount),
+        # not in this pass/fail check.
+        elif rt == self.RuleType.MAX_DISCOUNTED_ITEMS:
+            return True, ''
 
         # Fallback – unknown / unhandled combination passes silently
         return True, ''
