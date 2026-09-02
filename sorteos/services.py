@@ -9,13 +9,20 @@ siempre si nadie entraba a darle clic (ver memoria
 sorteos-diseno-regla-y-datos).
 """
 
+import logging
 import random
 from datetime import datetime, timezone
 
+from bs4 import BeautifulSoup
+from django.conf import settings
+from django.contrib.auth.models import User
 from django.db.models import Count, Sum
 
 from products.models import Transactions
+from utils.SendEmail import SendEmail
 from .models import Sorteo, SorteoWinner
+
+logger = logging.getLogger(__name__)
 
 # Estados de pago exitoso vistos en produccion entre los dos gateways que ha
 # usado la tienda (Bold via webhook/redirect, y el ePayco legacy que todavia
@@ -75,6 +82,41 @@ def participation_rows(sorteo):
     return result
 
 
+def _send_winner_email(sorteo, user):
+    """Avisa al ganador reusando la misma plantilla de marca de las
+    confirmaciones de compra (settings.EMAIL_FOR_SALE, ver
+    products.views.send_email_notification) -- mismo logo, mismos canales de
+    soporte, para que no se vea como un correo aparte del resto de la tienda.
+    Antes de este cambio nadie avisaba al ganador de nada; se enteraba solo
+    si entraba por su cuenta a /rewards/ a revisar."""
+    if not user.email:
+        logger.warning('Sorteo "%s": ganador user_id=%s sin email, no se pudo avisar.', sorteo, user.id)
+        return
+
+    prize_img_html = (
+        f'<p style="text-align:center;margin:20px 0;">'
+        f'<img src="{sorteo.prize_image_url}" alt="{sorteo.title}" '
+        f'style="max-width:260px;border-radius:8px;"></p>'
+        if sorteo.prize_image_url else ''
+    )
+    message_html = (
+        f'<h2 style="margin:0 0 12px;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">'
+        f'🎉 ¡Ganaste el sorteo "{sorteo.title}"!</h2>'
+        f'<p style="margin:0 0 8px;color:#8a9bb8;font-family:Arial,Helvetica,sans-serif;'
+        f'font-size:14px;line-height:1.6;">{sorteo.legend}</p>'
+        f'{prize_img_html}'
+        f'<p style="margin:16px 0 0;color:#8a9bb8;font-family:Arial,Helvetica,sans-serif;font-size:14px;">'
+        f'Escríbenos por WhatsApp para coordinar la entrega de tu premio.</p>'
+    )
+
+    soup = BeautifulSoup(settings.EMAIL_FOR_SALE, features='html.parser')
+    body = soup.find(id='body') or soup
+    body.clear()
+    body.append(BeautifulSoup(message_html, 'html.parser'))
+
+    SendEmail().__int__(str(soup), f'🎉 ¡Ganaste el sorteo {sorteo.title}!', user.email)
+
+
 def draw_winners(sorteo):
     """Elige los ganadores de un sorteo ACTIVE y lo marca FINISHED.
 
@@ -105,6 +147,9 @@ def draw_winners(sorteo):
 
     sorteo.status = 'FINISHED'
     sorteo.save(update_fields=['status'])
+
+    for user in User.objects.filter(id__in=chosen):
+        _send_winner_email(sorteo, user)
 
     return chosen, len(qualified_user_ids)
 
