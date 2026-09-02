@@ -1,0 +1,114 @@
+"""Logica compartida para elegir ganadores de un sorteo.
+
+Extraida de sorteos/admin.py (accion "Ejecutar sorteo") para que la misma
+regla de calificacion y de eleccion la use tambien el comando
+ejecutar_sorteos_vencidos, que un cron corre cada 15 minutos para cerrar
+solo los sorteos cuya end_date ya paso -- sin esto, elegir ganador era una
+accion manual del admin y un sorteo vencido se quedaba en ACTIVE para
+siempre si nadie entraba a darle clic (ver memoria
+sorteos-diseno-regla-y-datos).
+"""
+
+import random
+from datetime import datetime, timezone
+
+from django.db.models import Count, Sum
+
+from products.models import Transactions
+from .models import Sorteo, SorteoWinner
+
+# Estados de pago exitoso vistos en produccion entre los dos gateways que ha
+# usado la tienda (Bold via webhook/redirect, y el ePayco legacy que todavia
+# deja filas). Verificado con
+# SELECT status, COUNT(*) FROM products_transactions GROUP BY status.
+TRANSACTION_SUCCESS_STATUSES = ('approved', 'SALE_APPROVED', 'aceptada', 'accepted')
+
+STATUS_PARTICIPA = 'Participa'
+STATUS_PARCIAL = 'Parcial'
+
+
+def qualifies(purchases_count, amount_sum, sorteo):
+    has_count_req = sorteo.min_purchases is not None
+    has_amount_req = sorteo.min_amount is not None
+    count_ok = (not has_count_req) or purchases_count >= sorteo.min_purchases
+    amount_ok = (not has_amount_req) or (amount_sum or 0) >= sorteo.min_amount
+
+    if has_count_req and has_amount_req:
+        return (count_ok and amount_ok) if sorteo.require_both else (count_ok or amount_ok)
+    return count_ok and amount_ok
+
+
+def participation_rows(sorteo):
+    """Filas de products_transactions (el dinero real cobrado, via Bold o el
+    ePayco legacy) agrupadas por usuario con al menos un pago exitoso dentro
+    de la ventana del sorteo, con su estado de participacion: "Participa" si
+    ya cumple los requisitos (mismo calculo que usa hc-fastapi en
+    app/services/sorteos.py para el banner del frontend), "Parcial" si tiene
+    compras en el sorteo pero todavia no los cumple.
+
+    Una compra = una transaccion (un checkout), no una linea de producto:
+    si el carrito tenia 2 productos, cuenta como 1 compra. El monto es lo
+    que realmente se cobro (neto de saldo/cupon aplicado), no el precio de
+    catalogo -- por eso NO se calcula contra products_saledetail (que no
+    guarda monto) ni contra orders_buy/SorteoOrderBuy (tabla de hc-fastapi,
+    practicamente vacia en produccion). Ver la nota en sorteos/models.py.
+    """
+    rows = (
+        Transactions.objects
+        .filter(
+            status__in=TRANSACTION_SUCCESS_STATUSES,
+            date_transaction__gte=sorteo.start_date,
+            date_transaction__lte=sorteo.end_date,
+        )
+        .values('user_id')
+        .annotate(purchases_count=Count('id_transaction'), amount_sum=Sum('amount'))
+    )
+    result = []
+    for row in rows:
+        row_qualifies = qualifies(row['purchases_count'], row['amount_sum'], sorteo)
+        result.append({
+            'user_id': row['user_id'],
+            'purchases_count': row['purchases_count'],
+            'amount_sum': row['amount_sum'],
+            'status': STATUS_PARTICIPA if row_qualifies else STATUS_PARCIAL,
+        })
+    return result
+
+
+def draw_winners(sorteo):
+    """Elige los ganadores de un sorteo ACTIVE y lo marca FINISHED.
+
+    Devuelve None si el sorteo ya estaba FINISHED (nada que hacer). En caso
+    contrario devuelve (chosen_user_ids, calificados_totales) -- chosen_user_ids
+    puede ser una lista vacia si nadie califica todavia, en cuyo caso el
+    sorteo NO se marca FINISHED (se deja ACTIVE para que un cron posterior
+    lo reintente, por si una transaccion tarda en conciliarse).
+    """
+    if sorteo.status == 'FINISHED':
+        return None
+
+    qualified_user_ids = [
+        row['user_id'] for row in participation_rows(sorteo) if row['status'] == STATUS_PARTICIPA
+    ]
+
+    if not qualified_user_ids:
+        return [], 0
+
+    winners_count = min(sorteo.winners_count, len(qualified_user_ids))
+    chosen = random.sample(qualified_user_ids, winners_count)
+
+    now = datetime.now(timezone.utc)
+    SorteoWinner.objects.bulk_create([
+        SorteoWinner(sorteo=sorteo, user_id=user_id, drawn_at=now)
+        for user_id in chosen
+    ])
+
+    sorteo.status = 'FINISHED'
+    sorteo.save(update_fields=['status'])
+
+    return chosen, len(qualified_user_ids)
+
+
+def sorteos_vencidos_sin_cerrar():
+    """ACTIVE cuya end_date ya paso -- los candidatos que el cron debe cerrar."""
+    return Sorteo.objects.filter(status='ACTIVE', end_date__lte=datetime.now(timezone.utc))
