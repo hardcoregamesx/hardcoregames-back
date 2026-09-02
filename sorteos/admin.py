@@ -1,19 +1,11 @@
-import random
 from datetime import datetime, timezone
 
 from django.contrib import admin, messages
 from django.contrib.auth.models import User
-from django.db.models import Count, Sum
 from django.utils.html import format_html, format_html_join
 
-from products.models import Transactions
 from .models import Sorteo, SorteoWinner
-
-# Estados de pago exitoso vistos en produccion entre los dos gateways que ha
-# usado la tienda (Bold via webhook/redirect, y el ePayco legacy que todavia
-# deja filas). Verificado con
-# SELECT status, COUNT(*) FROM products_transactions GROUP BY status.
-TRANSACTION_SUCCESS_STATUSES = ('approved', 'SALE_APPROVED', 'aceptada', 'accepted')
+from .services import STATUS_PARTICIPA, draw_winners, participation_rows
 
 
 class SorteoWinnerInline(admin.TabularInline):
@@ -24,62 +16,9 @@ class SorteoWinnerInline(admin.TabularInline):
     can_delete = False
 
     def has_add_permission(self, request, obj=None):
-        # Los ganadores solo se crean via la accion "Ejecutar sorteo".
+        # Los ganadores solo se crean via la accion "Ejecutar sorteo" (o el
+        # comando ejecutar_sorteos_vencidos que corre por cron).
         return False
-
-
-def _qualifies(purchases_count, amount_sum, sorteo):
-    has_count_req = sorteo.min_purchases is not None
-    has_amount_req = sorteo.min_amount is not None
-    count_ok = (not has_count_req) or purchases_count >= sorteo.min_purchases
-    amount_ok = (not has_amount_req) or (amount_sum or 0) >= sorteo.min_amount
-
-    if has_count_req and has_amount_req:
-        return (count_ok and amount_ok) if sorteo.require_both else (count_ok or amount_ok)
-    return count_ok and amount_ok
-
-
-STATUS_PARTICIPA = 'Participa'
-STATUS_PARCIAL = 'Parcial'
-
-
-def _participation_rows(sorteo):
-    """Filas de products_transactions (el dinero real cobrado, via Bold o el
-    ePayco legacy) agrupadas por usuario con al menos un pago exitoso dentro
-    de la ventana del sorteo, con su estado de participacion: "Participa" si
-    ya cumple los requisitos (mismo calculo que usa hc-fastapi en
-    app/services/sorteos.py para el banner del frontend), "Parcial" si tiene
-    compras en el sorteo pero todavia no los cumple. Los usuarios sin ningun
-    pago exitoso en la ventana ("No participa") ni siquiera aparecen aqui,
-    asi que no hace falta excluirlos aparte: cualquier fila que devuelve
-    esta funcion ya es "distinta de No participa".
-
-    Una compra = una transaccion (un checkout), no una linea de producto:
-    si el carrito tenia 2 productos, cuenta como 1 compra. El monto es lo
-    que realmente se cobro (neto de saldo/cupon aplicado), no el precio de
-    catalogo -- por eso NO se calcula contra products_saledetail (que no
-    guarda monto) ni contra orders_buy/SorteoOrderBuy (tabla de hc-fastapi,
-    practicamente vacia en produccion). Ver la nota en sorteos/models.py."""
-    rows = (
-        Transactions.objects
-        .filter(
-            status__in=TRANSACTION_SUCCESS_STATUSES,
-            date_transaction__gte=sorteo.start_date,
-            date_transaction__lte=sorteo.end_date,
-        )
-        .values('user_id')
-        .annotate(purchases_count=Count('id_transaction'), amount_sum=Sum('amount'))
-    )
-    result = []
-    for row in rows:
-        qualifies = _qualifies(row['purchases_count'], row['amount_sum'], sorteo)
-        result.append({
-            'user_id': row['user_id'],
-            'purchases_count': row['purchases_count'],
-            'amount_sum': row['amount_sum'],
-            'status': STATUS_PARTICIPA if qualifies else STATUS_PARCIAL,
-        })
-    return result
 
 
 @admin.action(description='Ejecutar sorteo (elige ganadores al azar)')
@@ -91,31 +30,17 @@ def ejecutar_sorteo(modeladmin, request, queryset):
             )
             continue
 
-        qualified_user_ids = [
-            row['user_id'] for row in _participation_rows(sorteo) if row['status'] == STATUS_PARTICIPA
-        ]
+        chosen, calificados = draw_winners(sorteo)
 
-        if not qualified_user_ids:
+        if not chosen:
             modeladmin.message_user(
                 request, f'"{sorteo}": nadie califica todavía, no se eligió ningún ganador.',
                 level=messages.WARNING,
             )
             continue
 
-        winners_count = min(sorteo.winners_count, len(qualified_user_ids))
-        chosen = random.sample(qualified_user_ids, winners_count)
-
-        now = datetime.now(timezone.utc)
-        SorteoWinner.objects.bulk_create([
-            SorteoWinner(sorteo=sorteo, user_id=user_id, drawn_at=now)
-            for user_id in chosen
-        ])
-
-        sorteo.status = 'FINISHED'
-        sorteo.save(update_fields=['status'])
-
         modeladmin.message_user(
-            request, f'"{sorteo}": {len(chosen)} ganador(es) elegido(s) entre {len(qualified_user_ids)} calificados.',
+            request, f'"{sorteo}": {len(chosen)} ganador(es) elegido(s) entre {calificados} calificados.',
             level=messages.SUCCESS,
         )
 
@@ -146,7 +71,7 @@ class SorteoAdmin(admin.ModelAdmin):
     def participantes_count(self, obj):
         if obj.status != 'ACTIVE':
             return '—'
-        return len(_participation_rows(obj))
+        return len(participation_rows(obj))
     participantes_count.short_description = 'Participan (≠ No participa)'
 
     def participantes_actuales(self, obj):
@@ -155,7 +80,7 @@ class SorteoAdmin(admin.ModelAdmin):
         if obj.status != 'ACTIVE':
             return 'Solo se calcula para sorteos activos.'
 
-        rows = _participation_rows(obj)
+        rows = participation_rows(obj)
         if not rows:
             return 'Nadie tiene estado "Participa" ni "Parcial" todavía.'
 
