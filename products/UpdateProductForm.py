@@ -29,11 +29,12 @@ class UpdateProductForm(forms.ModelForm):
                 initial=initial_licencia
             )
 
-            self.fields['duracion_dias_alquiler'] = forms.ChoiceField(
-                choices=[(item.duracion_dias_alquiler, str(item.duracion_dias_alquiler)) for item in games_inventory],
-                widget=forms.Select,
+            self.fields['duracion_dias_alquiler'] = forms.IntegerField(
+                min_value=0,
                 required=True,
-                label="Días Duración"
+                label="Días de alquiler",
+                help_text="0 = producto de venta permanente (no es alquiler). "
+                          "Mayor a 0 = días de duración del alquiler.",
             )
 
     class Meta:

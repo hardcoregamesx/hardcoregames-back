@@ -292,15 +292,29 @@ class GameDetailAdmin(admin.ModelAdmin):
     def save_model(request, obj, form, change):
         product = int(request.POST.get('producto'))
         license = int(request.POST.get('licencia'))
-        duration_days = int(request.POST.get('duracion_dias_alquiler'))
+        new_duration = int(request.POST.get('duracion_dias_alquiler'))
+
+        if not change or not obj.pk:
+            obj.save()
+            cache.clear()
+            return
+
+        # obj ya trae los valores nuevos del form aplicados en memoria, pero
+        # todavia no se guardo nada en la fila que abrio este change form
+        # (este metodo nunca llama a obj.save()): la fila en BD sigue con
+        # los valores viejos, asi que la leemos de nuevo para saber a que
+        # grupo (producto+licencia+duracion) pertenecia antes del cambio.
+        old_duration = GameDetail.objects.get(pk=obj.pk).duracion_dias_alquiler
 
         game_details = GameDetail.objects.filter(
             producto=product,
             licencia=license,
-            duracion_dias_alquiler=duration_days
+            duracion_dias_alquiler=old_duration
         )
 
         update_fields = {}
+        if new_duration != old_duration:
+            update_fields['duracion_dias_alquiler'] = new_duration
         new_price = request.POST.get('precio')
         price_off = request.POST.get('precio_descuento')
         if new_price:
