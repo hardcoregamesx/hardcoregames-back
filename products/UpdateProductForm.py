@@ -38,4 +38,4 @@ class UpdateProductForm(forms.ModelForm):
 
     class Meta:
         model = GameDetail
-        fields = ('producto', 'licencia', 'precio', 'precio_descuento', 'duracion_dias_alquiler')
+        fields = ('producto', 'consola', 'licencia', 'precio', 'precio_descuento', 'duracion_dias_alquiler')

@@ -5,8 +5,8 @@
   <p>
     Cuenta: <strong>{{ cuenta.cuenta }}</strong>. Estas combinaciones ya tienen
     stock registrado con otra licencia pero todavía no tienen licencia
-    <strong>Secundaria</strong>. El precio se toma automáticamente de otra
-    licencia Secundaria ya existente para ese mismo producto/consola.
+    <strong>{{ licencia_nombre }}</strong>. El precio se toma automáticamente de otra
+    licencia {{ licencia_nombre }} ya existente para ese mismo producto/consola.
     Escribe el stock que quieres agregar y deja en blanco las que no quieras crear.
   </p>
 
@@ -17,7 +17,7 @@
         <tr>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Producto</th>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Consola</th>
-          <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Precio de referencia (Secundaria)</th>
+          <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Precio de referencia ({{ licencia_nombre }})</th>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Stock a agregar</th>
         </tr>
       </thead>

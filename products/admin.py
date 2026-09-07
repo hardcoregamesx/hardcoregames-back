@@ -289,6 +289,13 @@ class GameDetailAdmin(admin.ModelAdmin):
 
     @staticmethod
     def save_model(request, obj, form, change):
+        # Persiste primero los campos propios de esta fila (incluida
+        # 'consola', antes imposible de corregir desde el admin porque
+        # este metodo hacia un bulk-update aparte que la ignoraba por
+        # completo). Despues de esto, obj.pk ya refleja lo enviado en el
+        # formulario para producto/consola/licencia/precio/duracion.
+        obj.save()
+
         product = int(request.POST.get('producto'))
         license = int(request.POST.get('licencia'))
         duration_days = int(request.POST.get('duracion_dias_alquiler'))
@@ -344,7 +351,7 @@ class GameDetailAdmin(admin.ModelAdmin):
     readonly_fields = ('account_name', 'account_password', 'account_stock')
     fieldsets = (
         (None, {
-            'fields': ('producto', 'licencia', 'precio', 'precio_descuento', 'duracion_dias_alquiler'),
+            'fields': ('producto', 'consola', 'licencia', 'precio', 'precio_descuento', 'duracion_dias_alquiler'),
         }),
         ('Información de Cuenta', {
             'fields': ('account_name', 'account_password', 'account_stock'),
@@ -423,7 +430,7 @@ class ProductAccountsAdmin(admin.ModelAdmin):
     list_filter = ["tipo_cuenta",]
     list_per_page = 10
     inlines = [GameDetailStockInline]
-    readonly_fields = ('agregar_licencia_secundaria',)
+    readonly_fields = ('agregar_licencia_secundaria', 'agregar_licencia_pc')
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_stock_total=Sum('gamedetail__stock'))
@@ -479,12 +486,61 @@ class ProductAccountsAdmin(admin.ModelAdmin):
         url = reverse('admin:products_productaccounts_agregar_secundaria', args=[obj.pk])
         return format_html('<a class="button" href="{}">+ Agregar licencia Secundaria</a>', url)
 
+    @classmethod
+    def _combos_sin_pc(cls, cuenta):
+        """Productos que esta cuenta ya vende (en cualquier consola) pero
+        para los que todavia no existe una fila de licencia Pc (consola=6,
+        id_license=4). A diferencia de Secundaria, la licencia Pc siempre
+        usa la consola 'Pc' (id 6) sin importar en que consola este
+        registrada el resto del stock de la cuenta — asi es como ya
+        aparece en el catalogo para todo producto que vende licencia Pc."""
+        faltantes = []
+        productos = (
+            GameDetail.objects.filter(cuenta=cuenta)
+            .exclude(producto__isnull=True)
+            .values_list('producto_id', flat=True)
+            .distinct()
+        )
+        for producto_id in productos:
+            ya_tiene_pc = GameDetail.objects.filter(
+                cuenta=cuenta, producto_id=producto_id, consola_id=6, licencia_id=4,
+            ).exists()
+            if not ya_tiene_pc:
+                faltantes.append(producto_id)
+        return faltantes
+
+    @staticmethod
+    def _precio_referencia_pc(producto_id):
+        """Toma el precio de una licencia Pc ya existente para ese mismo
+        producto (de cualquier otra cuenta) como referencia."""
+        return (
+            GameDetail.objects.filter(
+                producto_id=producto_id, consola_id=6, licencia_id=4, precio__gt=0,
+            )
+            .order_by('-id_game_detail')
+            .first()
+        )
+
+    @admin.display(description='Agregar licencia PC')
+    def agregar_licencia_pc(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        if not self._combos_sin_pc(obj):
+            return 'Esta cuenta ya tiene licencia PC para todos sus productos (o no tiene ninguno registrado).'
+        url = reverse('admin:products_productaccounts_agregar_pc', args=[obj.pk])
+        return format_html('<a class="button" href="{}">+ Agregar licencia PC</a>', url)
+
     def get_urls(self):
         return [
             path(
                 '<int:object_id>/agregar-secundaria/',
                 self.admin_site.admin_view(self.agregar_secundaria_view),
                 name='products_productaccounts_agregar_secundaria',
+            ),
+            path(
+                '<int:object_id>/agregar-pc/',
+                self.admin_site.admin_view(self.agregar_pc_view),
+                name='products_productaccounts_agregar_pc',
             ),
         ] + super().get_urls()
 
@@ -551,6 +607,75 @@ class ProductAccountsAdmin(admin.ModelAdmin):
             'title': f'Agregar licencia Secundaria — {cuenta.cuenta}',
             'cuenta': cuenta,
             'filas': filas,
+            'licencia_nombre': 'Secundaria',
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/products/productaccounts/agregar_secundaria.html', context)
+
+    def agregar_pc_view(self, request, object_id):
+        cuenta = get_object_or_404(ProductAccounts, pk=object_id)
+        producto_ids = self._combos_sin_pc(cuenta)
+        consola_pc = Consoles.objects.filter(id_console=6).first()
+
+        filas = []
+        for producto_id in producto_ids:
+            producto = Products.objects.filter(id_product=producto_id).first()
+            referencia = self._precio_referencia_pc(producto_id)
+            filas.append({
+                'producto_id': producto_id,
+                'consola_id': 6,
+                'producto': producto.title if producto else producto_id,
+                'consola': consola_pc.descripcion if consola_pc else 'Pc',
+                'referencia': referencia,
+            })
+
+        if request.method == 'POST':
+            creadas = []
+            sin_referencia = []
+            for fila in filas:
+                stock_raw = request.POST.get(f"stock_{fila['producto_id']}_{fila['consola_id']}", '').strip()
+                if not stock_raw:
+                    continue
+                try:
+                    stock = int(stock_raw)
+                except ValueError:
+                    continue
+                if stock <= 0:
+                    continue
+                if fila['referencia'] is None:
+                    sin_referencia.append(f"{fila['producto']} ({fila['consola']})")
+                    continue
+                referencia = fila['referencia']
+                GameDetail.objects.create(
+                    producto_id=fila['producto_id'],
+                    consola_id=6,
+                    licencia_id=4,
+                    cuenta=cuenta,
+                    duracion_dias_alquiler=referencia.duracion_dias_alquiler,
+                    stock=stock,
+                    precio=referencia.precio,
+                    precio_descuento=referencia.precio_descuento,
+                )
+                creadas.append(f"{fila['producto']} ({fila['consola']}) — stock {stock}, precio {referencia.precio}")
+
+            if creadas:
+                cache.clear()
+                messages.success(request, f"Licencia PC agregada: {', '.join(creadas)}.")
+            if sin_referencia:
+                messages.warning(
+                    request,
+                    f"No se pudo agregar (no hay precio de referencia de PC en el catálogo) para: {', '.join(sin_referencia)}.",
+                )
+            if not creadas and not sin_referencia:
+                messages.info(request, "No se ingresó stock para ningún producto, no se creó nada.")
+            return redirect(reverse('admin:products_productaccounts_change', args=[object_id]))
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': f'Agregar licencia PC — {cuenta.cuenta}',
+            'cuenta': cuenta,
+            'filas': filas,
+            'licencia_nombre': 'PC',
             'opts': self.model._meta,
         }
         return render(request, 'admin/products/productaccounts/agregar_secundaria.html', context)
