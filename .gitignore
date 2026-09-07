@@ -142,3 +142,4 @@ files/
 *.bak
 *.bak.*
 *.bak_*
+.specify/
