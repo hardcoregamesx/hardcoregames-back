@@ -289,6 +289,17 @@ class GameDetailAdmin(admin.ModelAdmin):
 
     @staticmethod
     def save_model(request, obj, form, change):
+        # 'stock' no esta en UpdateProductForm (se maneja desde los botones
+        # "Agregar licencia X" o el inline de la cuenta), asi que una fila
+        # nueva llega aqui con stock=None y el INSERT fallaba (la columna es
+        # NOT NULL). Con esto, "Add" sirve para crear una fila de referencia
+        # de precio (stock 0, invisible en la tienda porque el catalogo solo
+        # muestra stock>0) para una combinacion producto/consola/licencia
+        # que todavia no existe en ningun lado -- los botones de arriba solo
+        # agregan stock a una combinacion que ya tiene precio de referencia.
+        if not change and obj.stock is None:
+            obj.stock = 0
+
         # Persiste primero los campos propios de esta fila (incluida
         # 'consola', antes imposible de corregir desde el admin porque
         # este metodo hacia un bulk-update aparte que la ignoraba por
