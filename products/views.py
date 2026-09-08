@@ -28,6 +28,7 @@ from products.productSerializers import ProductsSerializer, ProductSerializer, S
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
 from users.models import User_Customized
 from rewards.models import PointTransaction
+from membership.models import YoutubeMembershipLink, MembershipDiscountLog
 from utils.SendEmail import SendEmail
 from utils.getJsonFromRequest import GetJsonFromRequest
 from django.http import JsonResponse
@@ -1400,37 +1401,61 @@ def process_bold_event(data):
         transaction.status = event_type
         transaction.save()
 
+MEMBERSHIP_DISCOUNT_PERCENT = {
+    'LOW': 1,
+    'MID': 2,
+    'HIGH': 5,
+}
+
+
+def _get_membership_discount_percent(user_id):
+    """Porcentaje de descuento VIP del miembro de YouTube, o (None, 0) si no
+    tiene una membresía activa. `status` solo lo cambia el sync diario (ver
+    app/jobs/sync_youtube_members.py en el repo fastapi) -- nunca se confía
+    en nada declarado por el cliente."""
+    link = YoutubeMembershipLink.objects.filter(user_id=user_id, status='ACTIVE').first()
+    if not link or not link.tier:
+        return None, 0
+    return link.tier, MEMBERSHIP_DISCOUNT_PERCENT.get(link.tier, 0)
+
+
 def _calculate_cart_amount(parsed_transaction):
     """Recalcula el total del carrito desde el catálogo real (precio, cupón,
-    saldo) -- nunca se toma de lo que declare el cliente. Usada tanto por
-    Bold como por Sistecrédito para que el mismo bug de precio no pueda
-    arreglarse en un lado y seguir abierto en el otro.
+    saldo, descuento VIP de miembro) -- nunca se toma de lo que declare el
+    cliente. Usada tanto por Bold como por Sistecrédito para que el mismo
+    bug de precio no pueda arreglarse en un lado y seguir abierto en el otro.
 
-    Devuelve (user_id, calculated_amount, cart_items, error_response). Si
-    algo no cuadra, error_response es un JsonResponse listo para devolver y
-    los demás valores son None.
+    Devuelve (user_id, calculated_amount, cart_items, error_response,
+    membership_discount). Si algo no cuadra, error_response es un
+    JsonResponse listo para devolver y los demás valores son None.
+    `membership_discount` es None si no se aplicó, o
+    {'tier': ..., 'percent': ..., 'amount_saved': ...} si sí.
     """
     user_id = parsed_transaction.get('id_user')
     cart_data = parsed_transaction.get('data') or []
     if not user_id or not cart_data:
-        return None, None, None, JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400)
+        return None, None, None, JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400), None
 
     combination_ids = [item.get('id_combination') for item in cart_data]
     if not all(combination_ids):
-        return None, None, None, JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400)
+        return None, None, None, JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400), None
 
     game_details = {
         gd.id_game_detail: gd
         for gd in GameDetail.objects.filter(pk__in=combination_ids)
     }
     if len(game_details) != len(set(combination_ids)):
-        return None, None, None, JsonResponse({"error": "Uno o más productos ya no existen"}, status=400)
+        return None, None, None, JsonResponse({"error": "Uno o más productos ya no existen"}, status=400), None
 
     cart_items = []
     calculated_subtotal = 0
+    any_item_on_week_offer = False
     for combo_id in combination_ids:
         gd = game_details[combo_id]
-        unit_price = gd.precio_descuento if 0 < gd.precio_descuento < gd.precio else gd.precio
+        has_offer_price = 0 < gd.precio_descuento < gd.precio
+        unit_price = gd.precio_descuento if has_offer_price else gd.precio
+        if has_offer_price:
+            any_item_on_week_offer = True
         calculated_subtotal += unit_price
         cart_items.append({
             'id_combination': combo_id,
@@ -1439,17 +1464,18 @@ def _calculate_cart_amount(parsed_transaction):
         })
 
     calculated_amount = calculated_subtotal
+    coupon_discount = 0
 
     coupon_code = parsed_transaction.get('couponCode')
     if coupon_code:
         user = User.objects.filter(pk=user_id).first()
         coupon = Coupon.objects.filter(name_coupon__iexact=coupon_code).first()
         if not user or not coupon:
-            return None, None, None, JsonResponse({"error": "Cupón inválido"}, status=400)
+            return None, None, None, JsonResponse({"error": "Cupón inválido"}, status=400), None
 
         is_valid, reason = coupon.validate_coupon(user, calculated_subtotal, cart_items)
         if not is_valid:
-            return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400)
+            return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400), None
 
         def _unit_price(combo_id):
             gd = game_details[combo_id]
@@ -1487,6 +1513,7 @@ def _calculate_cart_amount(parsed_transaction):
             discount = round(eligible_total * coupon.percentage_off / 100)
 
         calculated_amount = max(calculated_subtotal - discount, 0)
+        coupon_discount = discount
 
     try:
         balance_applied = int(parsed_transaction.get('balanceApplied') or 0)
@@ -1494,7 +1521,21 @@ def _calculate_cart_amount(parsed_transaction):
         balance_applied = 0
 
     if balance_applied < 0:
-        return None, None, None, JsonResponse({"error": "balanceApplied inválido"}, status=400)
+        return None, None, None, JsonResponse({"error": "balanceApplied inválido"}, status=400), None
+
+    # Descuento VIP de miembro de YouTube: excluyente con cupón, saldo y
+    # oferta de semana (el margen real por variante es delgado en los
+    # productos que más rotan, un descuento acumulado los deja sin margen).
+    # Se calcula ANTES de restar el saldo para que ambos actúen sobre la
+    # misma base, pero nunca los dos a la vez: si ya hubo cupón o hay saldo
+    # por aplicar, no se ofrece.
+    membership_discount = None
+    if coupon_discount == 0 and balance_applied == 0 and not any_item_on_week_offer:
+        tier, percent = _get_membership_discount_percent(user_id)
+        if percent > 0:
+            amount_saved = round(calculated_amount * percent / 100)
+            calculated_amount = max(calculated_amount - amount_saved, 0)
+            membership_discount = {'tier': tier, 'percent': percent, 'amount_saved': amount_saved}
 
     if balance_applied > 0:
         with connection.cursor() as cursor:
@@ -1505,10 +1546,10 @@ def _calculate_cart_amount(parsed_transaction):
             row = cursor.fetchone()
         current_balance = row[0] if row else 0
         if balance_applied > current_balance:
-            return None, None, None, JsonResponse({"error": "Saldo insuficiente"}, status=400)
+            return None, None, None, JsonResponse({"error": "Saldo insuficiente"}, status=400), None
         calculated_amount = max(calculated_amount - balance_applied, 0)
 
-    return user_id, calculated_amount, cart_items, None
+    return user_id, calculated_amount, cart_items, None, membership_discount
 
 
 @csrf_exempt
@@ -1532,7 +1573,7 @@ def generate_hash_bold(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction inválido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
 
@@ -1551,10 +1592,27 @@ def generate_hash_bold(request):
     order_id = generate_order_id()
     signature = generate_signature(order_id, calculated_amount, currency, settings.SECRET_KEY_BOLD)
 
-    create_transaction_record(order_id, calculated_amount, request_transaction)
+    transaction = create_transaction_record(order_id, calculated_amount, request_transaction)
+    _log_membership_discount(transaction, user_id, membership_discount)
 
     payload = build_payload(order_id, signature)
     return JsonResponse(payload, status=200)
+
+
+def _log_membership_discount(transaction, user_id, membership_discount):
+    """Auditoria del descuento VIP realmente aplicado en un checkout, para
+    poder medir su impacto en margen (ver
+    [[ventas-hc-modelo-de-costeo-y-abonos]]). No-op si no aplicó."""
+    if not membership_discount:
+        return
+    MembershipDiscountLog.objects.create(
+        transaction=transaction,
+        user_id=user_id,
+        tier=membership_discount['tier'],
+        percent_applied=membership_discount['percent'],
+        amount_saved=membership_discount['amount_saved'],
+        applied_at=now(),
+    )
 
 def parse_request_data(request):
     try:
@@ -1662,7 +1720,7 @@ def sistecredito_create(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction inválido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
 
@@ -1705,6 +1763,7 @@ def sistecredito_create(request):
         request=stored_request,
         user_id=User.objects.filter(pk=user_id).first(),
     )
+    _log_membership_discount(transaction, user_id, membership_discount)
 
     sandbox_active = os.getenv("SISTECREDITO_SANDBOX", "false").strip().lower() == "true"
 
