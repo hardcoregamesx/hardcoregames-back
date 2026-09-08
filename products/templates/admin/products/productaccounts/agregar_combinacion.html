@@ -1,12 +1,13 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
-<div style="max-width:800px;">
+<div style="max-width:900px;">
   <p>
-    Cuenta: <strong>{{ cuenta.cuenta }}</strong>. Estas combinaciones ya tienen
-    stock registrado con otra licencia pero todavía no tienen licencia
-    <strong>Secundaria</strong>. El precio se toma automáticamente de otra
-    licencia Secundaria ya existente para ese mismo producto/consola.
+    Cuenta: <strong>{{ cuenta.cuenta }}</strong>. Estas son las combinaciones de
+    consola y licencia que le faltan a esta cuenta para los productos que ya
+    vende (según las consolas listadas para cada producto en el catálogo).
+    Cuando ya existe un precio para esa misma combinación en otra cuenta se
+    usa como referencia; si no existe ninguna, escríbelo a mano.
     Escribe el stock que quieres agregar y deja en blanco las que no quieras crear.
   </p>
 
@@ -17,7 +18,8 @@
         <tr>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Producto</th>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Consola</th>
-          <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Precio de referencia (Secundaria)</th>
+          <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Licencia</th>
+          <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Precio</th>
           <th style="text-align:left; padding:6px; border-bottom:1px solid #999;">Stock a agregar</th>
         </tr>
       </thead>
@@ -26,17 +28,20 @@
         <tr>
           <td style="padding:6px; border-bottom:1px solid #333;">{{ fila.producto }}</td>
           <td style="padding:6px; border-bottom:1px solid #333;">{{ fila.consola }}</td>
+          <td style="padding:6px; border-bottom:1px solid #333;">{{ fila.licencia }}</td>
           <td style="padding:6px; border-bottom:1px solid #333;">
             {% if fila.referencia %}
               {{ fila.referencia.precio }}
             {% else %}
-              <span style="color:#c62828;">sin referencia — no se puede agregar</span>
+              <input type="number" min="1" step="1"
+                     name="precio_{{ fila.clave }}"
+                     placeholder="precio"
+                     style="width:100px;">
             {% endif %}
           </td>
           <td style="padding:6px; border-bottom:1px solid #333;">
             <input type="number" min="1" step="1"
-                   name="stock_{{ fila.producto_id }}_{{ fila.consola_id }}"
-                   {% if not fila.referencia %}disabled{% endif %}
+                   name="stock_{{ fila.clave }}"
                    style="width:100px;">
           </td>
         </tr>
