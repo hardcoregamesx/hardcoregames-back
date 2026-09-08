@@ -14,8 +14,8 @@ class RoulettePrizeInline(admin.TabularInline):
 
 @admin.register(Roulette)
 class RouletteAdmin(admin.ModelAdmin):
-    list_display = ('name', 'is_active', 'cost_points', 'max_spins_per_day', 'created_at')
-    list_filter = ('is_active',)
+    list_display = ('name', 'is_active', 'requires_membership', 'cost_points', 'max_spins_per_day', 'max_spins_per_month', 'created_at')
+    list_filter = ('is_active', 'requires_membership')
     inlines = [RoulettePrizeInline]
 
 
