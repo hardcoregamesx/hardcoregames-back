@@ -1,7 +1,9 @@
+from datetime import date
+
 from django.contrib.auth.models import User
 from django.db import models
 
-from products.models import Coupon
+from products.models import Coupon, SaleDetail
 
 
 # ----------------------------------------------------------------------- #
@@ -121,3 +123,37 @@ class RouletteSpin(models.Model):
 
     def __str__(self):
         return f'{self.user} → {self.prize} ({self.created_at:%Y-%m-%d %H:%M})'
+
+
+class JuegosPorVencerManager(models.Manager):
+    """Solo cuentas de juego individuales vendidas con modalidad de
+    suscripcion (tienen fecha_vencimiento), activas todavia. Excluye
+    servicios genericos (Game Pass, Crunchyroll, HBO, etc.): esos tambien
+    usan producto.type_id = 'Suscripción', pero su producto.tipo_juego
+    queda guardado como el generico 'Suscripción' en vez de un genero de
+    juego real (Accion, Lucha, Disparos...)."""
+
+    def get_queryset(self):
+        today = date.today()
+        return super().get_queryset().filter(
+            fecha_vencimiento__gte=today,
+            producto__type_id__description__iexact='Suscripción',
+        ).exclude(
+            producto__tipo_juego__descripcion__iexact='Suscripción',
+        )
+
+
+class JuegoPorVencer(SaleDetail):
+    """Proxy de solo lectura sobre SaleDetail (app products) para mostrarlo
+    agrupado bajo Hardcore Rewards en el panel: mismo mecanismo que ya usa
+    sorteos.models para aparecer en esta seccion (Meta.app_label), y mismo
+    patron de proxy que products.models.GameDetailInventario."""
+
+    objects = JuegosPorVencerManager()
+
+    class Meta:
+        proxy = True
+        app_label = 'rewards'
+        verbose_name = 'Juego por vencer'
+        verbose_name_plural = 'Juegos por vencer'
+        ordering = ['fecha_vencimiento']

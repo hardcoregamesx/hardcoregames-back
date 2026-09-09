@@ -36,6 +36,13 @@
       <span class="hc-kpi-value">{{ hc_kpis.usos_cupon_total|default:"—" }}</span>
       <span class="hc-kpi-caption">histórico completo, incluye cupones ya vencidos</span>
     </div>
+    <a class="hc-kpi-card hc-kpi-card--alert" href="{% url 'admin:rewards_juegoporvencer_changelist' %}">
+      <span class="hc-kpi-label">Juegos por vencer</span>
+      <span class="hc-kpi-value">{{ hc_kpis.juegos_por_vencer_count|default:"—" }}</span>
+      <span class="hc-kpi-caption">
+        {% if hc_kpis.juegos_por_vencer_proxima %}más próxima: {{ hc_kpis.juegos_por_vencer_proxima|date:"d/m/Y" }}{% else %}sin vencimientos próximos{% endif %}
+      </span>
+    </a>
   </div>
   {% endif %}
 

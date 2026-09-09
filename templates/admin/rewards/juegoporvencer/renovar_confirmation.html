@@ -1,0 +1,52 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Inicio</a>
+  &rsaquo; <a href="{% url 'admin:rewards_juegoporvencer_changelist' %}">Juegos por vencer</a>
+  &rsaquo; Renovar
+</div>
+{% endblock %}
+
+{% block content %}
+<p>
+  Vas a renovar <strong>{{ object.producto.title }}</strong>
+  (usuario: {{ object.usuario.email|default:"—" }}).
+</p>
+<p>
+  Vencimiento actual: <strong>{{ fecha_actual|date:"d/m/Y" }}</strong>
+  {% if dias_originales %} · duración con la que se vendió: {{ dias_originales }} días{% endif %}
+</p>
+
+<form method="post">{% csrf_token %}
+  <div>
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ object.pk }}">
+    <input type="hidden" name="action" value="renovar_suscripcion">
+    <input type="hidden" name="apply" value="yes">
+    <fieldset class="module aligned">
+      <div class="form-row">
+        <div>
+          <label for="id_nueva_fecha_vencimiento">Nueva fecha de vencimiento:</label>
+          {% if fecha_sugerida %}
+          <input type="date" id="id_nueva_fecha_vencimiento" name="nueva_fecha_vencimiento" value="{{ fecha_sugerida|date:'Y-m-d' }}">
+          <p class="help">
+            Sugerida automáticamente: vencimiento actual + {{ dias_originales }} días (la misma
+            duración con la que se vendió). Puedes cambiarla si aplica un plazo distinto.
+          </p>
+          {% else %}
+          <input type="date" id="id_nueva_fecha_vencimiento" name="nueva_fecha_vencimiento" value="{{ fecha_actual|date:'Y-m-d' }}">
+          <p class="help">
+            No se pudo calcular una duración automática para esta cuenta; ingresa la fecha manualmente.
+          </p>
+          {% endif %}
+        </div>
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <input type="submit" value="Confirmar renovación" class="default">
+      <a href="{% url 'admin:rewards_juegoporvencer_changelist' %}" class="button cancel-link" style="margin-left:12px;">Cancelar</a>
+    </div>
+  </div>
+</form>
+{% endblock %}
