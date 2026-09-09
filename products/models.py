@@ -340,6 +340,7 @@ class CouponRule(models.Model):
         DAY_OF_WEEK        = 'day_of_week',        'Día de la semana'
         REQUIRES_PRODUCT   = 'requires_product',   'Requiere producto en el carrito'
         MAX_DISCOUNTED_ITEMS = 'max_discounted_items', 'Máximo de ítems con descuento'
+        MATCHING_LICENSE_TO_ANCHOR = 'matching_license_to_anchor', 'Licencia del regalo debe igualar la licencia de la compra ancla'
 
     class Operator(models.TextChoices):
         GTE     = 'gte',     'Mayor o igual (>=)'
@@ -500,6 +501,16 @@ class CouponRule(models.Model):
         # happens where the price is computed (_calculate_cart_amount),
         # not in this pass/fail check.
         elif rt == self.RuleType.MAX_DISCOUNTED_ITEMS:
+            return True, ''
+
+        # --- matching_license_to_anchor -------------------------------------
+        # Not an eligibility gate either — always passes here. Whether a
+        # given gift item's licencia (Primaria/Secundaria) matches the
+        # licencia of an anchor item actually in the cart is a per-item
+        # filter, not a whole-cart pass/fail, so it's resolved where
+        # eligible_items is built in _calculate_cart_amount, same reason
+        # max_discounted_items lives there instead of here.
+        elif rt == self.RuleType.MATCHING_LICENSE_TO_ANCHOR:
             return True, ''
 
         # Fallback – unknown / unhandled combination passes silently

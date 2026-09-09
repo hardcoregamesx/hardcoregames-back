@@ -1461,6 +1461,27 @@ def _calculate_cart_amount(parsed_transaction):
             if not eligible_ids or i['id_combination'] in eligible_ids
         ]
 
+        # When the coupon requires the gift's licencia (Primaria/Secundaria)
+        # to match the licencia of the anchor product that unlocked it —
+        # e.g. "compra Primaria, regala Primaria; compra Secundaria, regala
+        # Secundaria" — a gift item only stays eligible if the cart also has
+        # an anchor item (one of requires_product's product_ids) with that
+        # same licencia. Two Primaria+Secundaria anchors in the same cart
+        # unlock both licencias for the gift.
+        if coupon.rules.filter(rule_type='matching_license_to_anchor').exists():
+            anchor_product_ids = set()
+            for rule in coupon.rules.filter(rule_type='requires_product'):
+                anchor_product_ids |= set((rule.value or {}).get('product_ids', []))
+            anchor_licenses = {
+                game_details[i['id_combination']].licencia_id
+                for i in cart_items
+                if game_details[i['id_combination']].producto_id in anchor_product_ids
+            }
+            eligible_items = [
+                i for i in eligible_items
+                if game_details[i['id_combination']].licencia_id in anchor_licenses
+            ]
+
         # A coupon can cap how many matching cart items actually receive the
         # discount (e.g. "buy game A, get ONE of these other games free" —
         # not every matching game the customer happens to add). Without
