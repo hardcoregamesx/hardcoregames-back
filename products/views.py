@@ -1952,7 +1952,19 @@ TRANSFERENCIA_PAYMENT_ID = "transferencia_brebb"
 PAGOS_NEQUI_BASE_URL = os.getenv("PAGOS_NEQUI_BASE_URL", "").rstrip("/")
 PAGOS_NEQUI_API_KEY = os.getenv("PAGOS_NEQUI_API_KEY", "")
 TRANSFERENCIA_WEBHOOK_SECRET = os.getenv("TRANSFERENCIA_WEBHOOK_SECRET", "")
-TRANSFERENCIA_BREB_KEY = os.getenv("TRANSFERENCIA_BREB_KEY", "@nequimil688")
+# Fallback si todavía no existe la fila en VariablesSistema (primer deploy).
+TRANSFERENCIA_BREB_KEY_DEFAULT = os.getenv("TRANSFERENCIA_BREB_KEY", "@nequimil688")
+TRANSFERENCIA_BREB_KEY_VARIABLE = "transferencia_breb_key"
+
+
+def _get_breb_key():
+    """La llave se edita desde el admin (Variables de sistema) para poder
+    cambiar de cuenta bancaria sin tocar código ni redesplegar. Se lee en
+    caliente en cada checkout -- no hay caché, es una sola fila."""
+    row = VariablesSistema.objects.filter(
+        nombre_variable=TRANSFERENCIA_BREB_KEY_VARIABLE, estado=True
+    ).first()
+    return row.valor.strip() if row and row.valor else TRANSFERENCIA_BREB_KEY_DEFAULT
 
 
 def _pagos_nequi_call(method, path, json_body, timeout=10):
@@ -2031,7 +2043,7 @@ def transferencia_create(request):
     return JsonResponse({
         "transactionId": order_id,
         "amount": calculated_amount,
-        "breBKey": TRANSFERENCIA_BREB_KEY,
+        "breBKey": _get_breb_key(),
         "deadlineAt": registered.get("deadline_at"),
     }, status=200)
 
