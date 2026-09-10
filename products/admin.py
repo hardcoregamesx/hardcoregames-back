@@ -279,7 +279,8 @@ class GameDetailAdmin(admin.ModelAdmin):
 
     def get_search_results(self, request, queryset, search_term):
         queryset, use_distinct = super().get_search_results(request, queryset, search_term)
-        queryset = queryset.filter(stock__gt=0, precio__gt=0,)
+        if request.GET.get('field_name') != 'game_details':
+            queryset = queryset.filter(stock__gt=0, precio__gt=0,)
         return queryset, use_distinct
 
     def product(obj):
