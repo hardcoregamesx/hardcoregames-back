@@ -2157,7 +2157,7 @@ def transferencia_webhook(request):
     return response
 
 
-VENTAS_WEBHOOK_URL = os.getenv("VENTAS_WEBHOOK_URL", "http://hc-ventas-django:8000/webhooks/bold/")
+VENTAS_WEBHOOK_URL = os.getenv("VENTAS_WEBHOOK_URL", "https://ventas.srv936408.hstgr.cloud/webhooks/bold/")
 VENTAS_TRANSFERENCIA_PAYMENT_METHOD = "TRANSFERENCIA_BREB"
 
 
