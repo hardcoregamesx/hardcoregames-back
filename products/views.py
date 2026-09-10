@@ -1939,3 +1939,304 @@ def process_sistecredito_event(verified_data):
     elif transaction_status in SISTECREDITO_TERMINAL_STATUSES:
         transaction.status = "failed"
         transaction.save()
+
+
+# ---------------------------------------------------------------------------
+# Transferencia Bre-B (Nequi/Davivienda) -- confirmación automática vía
+# pagos-nequi. Mismo patrón de "hash de aprobación" que Bold/Sistecrédito:
+# se crea la transacción en 'pendiente' y solo un webhook verificado la
+# mueve a 'approved' y llama a confirm_sale().
+# ---------------------------------------------------------------------------
+
+TRANSFERENCIA_PAYMENT_ID = "transferencia_brebb"
+PAGOS_NEQUI_BASE_URL = os.getenv("PAGOS_NEQUI_BASE_URL", "").rstrip("/")
+PAGOS_NEQUI_API_KEY = os.getenv("PAGOS_NEQUI_API_KEY", "")
+TRANSFERENCIA_WEBHOOK_SECRET = os.getenv("TRANSFERENCIA_WEBHOOK_SECRET", "")
+# Fallback si todavía no existe la fila en VariablesSistema (primer deploy).
+TRANSFERENCIA_BREB_KEY_DEFAULT = os.getenv("TRANSFERENCIA_BREB_KEY", "@nequimil688")
+TRANSFERENCIA_BREB_KEY_VARIABLE = "transferencia_breb_key"
+
+
+def _get_breb_key():
+    """La llave se edita desde el admin (Variables de sistema) para poder
+    cambiar de cuenta bancaria sin tocar código ni redesplegar. Se lee en
+    caliente en cada checkout -- no hay caché, es una sola fila."""
+    row = VariablesSistema.objects.filter(
+        nombre_variable=TRANSFERENCIA_BREB_KEY_VARIABLE, estado=True
+    ).first()
+    return row.valor.strip() if row and row.valor else TRANSFERENCIA_BREB_KEY_DEFAULT
+
+
+def _pagos_nequi_call(method, path, json_body, timeout=10):
+    """POST/GET autenticado contra pagos-nequi (X-Api-Key, no cookie de
+    sesion). Nunca lanza: devuelve None si la app de pagos no esta
+    configurada o no respondio -- quien llama decide que hacer con eso."""
+    if not PAGOS_NEQUI_BASE_URL or not PAGOS_NEQUI_API_KEY:
+        logger.error("pagos-nequi no configurado (falta PAGOS_NEQUI_BASE_URL o PAGOS_NEQUI_API_KEY)")
+        return None
+    try:
+        response = requests.request(
+            method, f"{PAGOS_NEQUI_BASE_URL}{path}",
+            json=json_body, headers={"X-Api-Key": PAGOS_NEQUI_API_KEY}, timeout=timeout,
+        )
+        if not response.ok:
+            logger.error("pagos-nequi %s %s -> %s: %s", method, path, response.status_code, response.text[:300])
+            return None
+        return response.json()
+    except requests.RequestException:
+        logger.exception("Fallo llamando a pagos-nequi %s %s", method, path)
+        return None
+
+
+@csrf_exempt
+def transferencia_create(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    data = parse_request_data(request)
+    if not data:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    nombre_pagador = (data.get("nombre_pagador") or "").strip()
+    request_transaction = data.get("request_transaction")
+    if not nombre_pagador or not request_transaction:
+        return JsonResponse({"error": "Faltan datos del pedido o el nombre del pagador"}, status=400)
+
+    try:
+        parsed_transaction = json.loads(request_transaction)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "request_transaction invalido"}, status=400)
+
+    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    if error_response:
+        return error_response
+
+    order_id = generate_order_id()
+    # nombre_pagador viaja dentro del mismo JSON que confirm_sale() ya sabe
+    # leer (solo usa id_user/data/couponCode/balanceApplied, el resto lo
+    # ignora) -- asi no hace falta ninguna columna ni migracion nueva.
+    stored_request = json.dumps({**parsed_transaction, "nombre_pagador": nombre_pagador})
+
+    transaction = Transactions.objects.create(
+        status="pendiente",
+        amount=calculated_amount,
+        payment_id=TRANSFERENCIA_PAYMENT_ID,
+        ref_payco=order_id,
+        id_invoice=order_id,
+        request=stored_request,
+        user_id=User.objects.filter(pk=user_id).first(),
+    )
+
+    registered = _pagos_nequi_call("POST", "/api/expectations", {
+        "transaction_id": order_id,
+        "nombre_pagador": nombre_pagador,
+        "monto_cop": calculated_amount,
+    })
+    if registered is None:
+        # Sin esto, el pedido queda pendiente para siempre -- nadie lo va a
+        # confirmar nunca. Mejor fallar la creacion y que el cliente
+        # reintente a que quede huerfano.
+        transaction.status = "failed"
+        transaction.save()
+        return JsonResponse({"error": "No se pudo iniciar la verificacion del pago, intenta de nuevo"}, status=502)
+
+    return JsonResponse({
+        "transactionId": order_id,
+        "amount": calculated_amount,
+        "breBKey": _get_breb_key(),
+        "deadlineAt": registered.get("deadline_at"),
+    }, status=200)
+
+
+@csrf_exempt
+def transferencia_confirmar_envio(request):
+    """El cliente dio clic en 'Ya transferi'. Requiere el mismo Bearer JWT
+    que salesByUser -- solo el dueno del pedido (o un superusuario) puede
+    correr su propio plazo."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    token_user_id, is_superuser = _get_verified_jwt_user(request)
+    if token_user_id is None:
+        return JsonResponse({"error": "No autenticado"}, status=401)
+
+    data = parse_request_data(request)
+    transaction_id = data.get("transactionId") if data else None
+    if not transaction_id:
+        return JsonResponse({"error": "Falta transactionId"}, status=400)
+
+    transaction = Transactions.objects.filter(ref_payco=transaction_id, payment_id=TRANSFERENCIA_PAYMENT_ID).first()
+    if not transaction:
+        return JsonResponse({"error": "Transaction not found"}, status=404)
+    if not is_superuser and transaction.user_id_id != token_user_id:
+        return JsonResponse({"error": "No autorizado"}, status=403)
+
+    result = _pagos_nequi_call("POST", f"/api/expectations/{transaction_id}/confirm-transfer", {})
+    if result is None:
+        return JsonResponse({"error": "No se pudo registrar la confirmacion, intenta de nuevo"}, status=502)
+
+    return JsonResponse({"ok": True, "deadlineAt": result.get("deadline_at")}, status=200)
+
+
+@csrf_exempt
+def transferencia_status(request):
+    """Polling desde el frontend mientras muestra el modal 'Verificando'."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    token_user_id, is_superuser = _get_verified_jwt_user(request)
+    if token_user_id is None:
+        return JsonResponse({"error": "No autenticado"}, status=401)
+
+    transaction_id = request.GET.get("transactionId")
+    if not transaction_id:
+        return JsonResponse({"error": "Falta transactionId"}, status=400)
+
+    transaction = Transactions.objects.filter(ref_payco=transaction_id, payment_id=TRANSFERENCIA_PAYMENT_ID).first()
+    if not transaction:
+        return JsonResponse({"error": "Transaction not found"}, status=404)
+    if not is_superuser and transaction.user_id_id != token_user_id:
+        return JsonResponse({"error": "No autorizado"}, status=403)
+
+    return JsonResponse({"status": transaction.status}, status=200)
+
+
+def _notify_transferencia_cancelada(transaction):
+    try:
+        email_to = transaction.user_id.email
+        html = (
+            f"<p>Hola,</p>"
+            f"<p>Tu pedido por transferencia (referencia {transaction.id_invoice}) "
+            f"por ${transaction.amount:,.0f} COP fue cancelado porque no pudimos confirmar el pago "
+            f"a tiempo.</p>"
+            f"<p>Si ya hiciste la transferencia, respondenos por WhatsApp con tu comprobante "
+            f"y lo resolvemos manualmente.</p>"
+        )
+        SendEmail().__int__(html, "Tu pedido por transferencia fue cancelado", email_to)
+    except Exception:
+        logger.exception("No se pudo enviar el correo de cancelacion para %s", transaction.id_invoice)
+
+
+@csrf_exempt
+def transferencia_webhook(request):
+    """Llamado por pagos-nequi cuando resuelve una expectativa de pago
+    (match automatico de alta confianza, vinculacion manual de un empleado,
+    o vencimiento del plazo). Mismo esquema de firma que Bold, adaptado:
+    HMAC-SHA256 sobre el body crudo, sin el paso de base64 intermedio que
+    exige especificamente la pasarela de Bold."""
+    logger.info("Received a request at transferencia_webhook")
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    signature = request.headers.get("x-pagos-signature", "")
+    body = request.body
+
+    response = JsonResponse({"message": "Event received successfully"}, status=200)
+
+    def process_request():
+        if not TRANSFERENCIA_WEBHOOK_SECRET:
+            logger.error("transferencia_webhook: TRANSFERENCIA_WEBHOOK_SECRET no configurado")
+            return
+
+        expected = hmac.new(TRANSFERENCIA_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            logger.error("transferencia_webhook: firma invalida")
+            return
+
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            logger.error("transferencia_webhook: body no es JSON valido")
+            return
+
+        process_transferencia_event(data)
+
+    threading.Thread(target=process_request).start()
+
+    return response
+
+
+VENTAS_WEBHOOK_URL = os.getenv("VENTAS_WEBHOOK_URL", "https://ventas.srv936408.hstgr.cloud/webhooks/bold/")
+VENTAS_TRANSFERENCIA_PAYMENT_METHOD = "TRANSFERENCIA_BREB"
+
+
+def _notify_ventas_module(transaction):
+    """Registra la venta en el módulo interno de ventas
+    (ventas.srv936408.hstgr.cloud), reusando el mismo webhook y el mismo shape
+    de evento que ya usa el webhook real de Bold ahí -- así corren del lado de
+    ventas la misma lógica de match de catálogo, comisión y descuento de
+    stock. Mismo patrón que ya usa /root/hc-ventas/reconciliar_ventas.py para
+    las ventas de Sistecrédito (que tampoco pasan por Bold).
+
+    Nunca debe poder tumbar la aprobación real de la venta si falla: solo se
+    loguea, igual que el resto de integraciones "best effort" de este módulo."""
+    try:
+        request_data = json.loads(transaction.request)
+        combination_ids = [
+            item["id_combination"] for item in request_data.get("data", [])
+            if item.get("id_combination")
+        ]
+        combinations = GameDetail.objects.filter(pk__in=combination_ids).select_related(
+            "producto", "licencia", "consola"
+        )
+        # GameDetail.__str__ ya arma "Título | Licencia | Consola | Días" --
+        # el mismo formato que el voucher de Bold y que reconciliar_ventas.py
+        # reconstruye a mano por SQL para Sistecrédito.
+        descripcion = " + ".join(str(gd) for gd in combinations)
+        payload = {
+            "data": {
+                "amount": {"total": int(transaction.amount)},
+                "payer_email": transaction.user_id.email if transaction.user_id else "",
+                "payment_method": VENTAS_TRANSFERENCIA_PAYMENT_METHOD,
+                "metadata": {"reference": transaction.id_invoice, "description": descripcion},
+            }
+        }
+        response = requests.post(VENTAS_WEBHOOK_URL, json=payload, timeout=15)
+        if not response.ok:
+            logger.error(
+                "Registro en el módulo de ventas falló (status=%s) para %s: %s",
+                response.status_code, transaction.id_invoice, response.text[:300],
+            )
+    except Exception:
+        logger.exception(
+            "No se pudo registrar en el módulo de ventas la transferencia %s", transaction.id_invoice
+        )
+
+
+def process_transferencia_event(data):
+    transaction_id = data.get("transaction_id")
+    confidence = data.get("confidence")
+
+    transaction = Transactions.objects.filter(
+        ref_payco=transaction_id, payment_id=TRANSFERENCIA_PAYMENT_ID
+    ).first()
+    if not transaction:
+        logger.warning("transferencia event para una referencia desconocida: %s", transaction_id)
+        return
+
+    if confidence == "alta":
+        if transaction.status == "approved":
+            logger.info("transferencia: transaccion ya estaba aprobada: %s", transaction_id)
+            return
+        logger.info("transferencia: aprobando %s (payment_id de pagos-nequi=%s)",
+                    transaction_id, data.get("payment_id"))
+        transaction.status = "approved"
+        transaction.save()
+        confirm_sale(transaction.request)
+        _notify_ventas_module(transaction)
+    elif confidence == "vencida":
+        # Solo cancela si sigue pendiente -- si ya se aprobo (por ejemplo un
+        # match de alta confianza que llego justo antes que el barrido de
+        # vencimiento), nunca se revierte una venta ya entregada.
+        if transaction.status != "pendiente":
+            logger.info(
+                "transferencia: vencimiento ignorado, la transaccion ya no esta pendiente: %s (status=%s)",
+                transaction_id, transaction.status,
+            )
+            return
+        transaction.status = "cancelada"
+        transaction.save()
+        _notify_transferencia_cancelada(transaction)
+    else:
+        logger.warning("transferencia_webhook: confidence desconocida %r para %s", confidence, transaction_id)
