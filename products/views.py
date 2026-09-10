@@ -2157,6 +2157,53 @@ def transferencia_webhook(request):
     return response
 
 
+VENTAS_WEBHOOK_URL = os.getenv("VENTAS_WEBHOOK_URL", "http://hc-ventas-django:8000/webhooks/bold/")
+VENTAS_TRANSFERENCIA_PAYMENT_METHOD = "TRANSFERENCIA_BREB"
+
+
+def _notify_ventas_module(transaction):
+    """Registra la venta en el módulo interno de ventas
+    (ventas.srv936408.hstgr.cloud), reusando el mismo webhook y el mismo shape
+    de evento que ya usa el webhook real de Bold ahí -- así corren del lado de
+    ventas la misma lógica de match de catálogo, comisión y descuento de
+    stock. Mismo patrón que ya usa /root/hc-ventas/reconciliar_ventas.py para
+    las ventas de Sistecrédito (que tampoco pasan por Bold).
+
+    Nunca debe poder tumbar la aprobación real de la venta si falla: solo se
+    loguea, igual que el resto de integraciones "best effort" de este módulo."""
+    try:
+        request_data = json.loads(transaction.request)
+        combination_ids = [
+            item["id_combination"] for item in request_data.get("data", [])
+            if item.get("id_combination")
+        ]
+        combinations = GameDetail.objects.filter(pk__in=combination_ids).select_related(
+            "producto", "licencia", "consola"
+        )
+        # GameDetail.__str__ ya arma "Título | Licencia | Consola | Días" --
+        # el mismo formato que el voucher de Bold y que reconciliar_ventas.py
+        # reconstruye a mano por SQL para Sistecrédito.
+        descripcion = " + ".join(str(gd) for gd in combinations)
+        payload = {
+            "data": {
+                "amount": {"total": int(transaction.amount)},
+                "payer_email": transaction.user_id.email if transaction.user_id else "",
+                "payment_method": VENTAS_TRANSFERENCIA_PAYMENT_METHOD,
+                "metadata": {"reference": transaction.id_invoice, "description": descripcion},
+            }
+        }
+        response = requests.post(VENTAS_WEBHOOK_URL, json=payload, timeout=15)
+        if not response.ok:
+            logger.error(
+                "Registro en el módulo de ventas falló (status=%s) para %s: %s",
+                response.status_code, transaction.id_invoice, response.text[:300],
+            )
+    except Exception:
+        logger.exception(
+            "No se pudo registrar en el módulo de ventas la transferencia %s", transaction.id_invoice
+        )
+
+
 def process_transferencia_event(data):
     transaction_id = data.get("transaction_id")
     confidence = data.get("confidence")
@@ -2177,6 +2224,7 @@ def process_transferencia_event(data):
         transaction.status = "approved"
         transaction.save()
         confirm_sale(transaction.request)
+        _notify_ventas_module(transaction)
     elif confidence == "vencida":
         # Solo cancela si sigue pendiente -- si ya se aprobo (por ejemplo un
         # match de alta confianza que llego justo antes que el barrido de
