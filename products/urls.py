@@ -40,4 +40,8 @@ urlpatterns = [
     path("sistecreditoCreate/", views.sistecredito_create, name="sistecredito_create"),
     path("sistecreditoWebhook/", views.sistecredito_webhook, name="sistecredito_webhook"),
     path("confirmSaleSistecredito/", views.confirm_sale_sistecredito, name="confirm_sale_sistecredito"),
+    path("transferenciaCreate/", views.transferencia_create, name="transferencia_create"),
+    path("transferenciaConfirmarEnvio/", views.transferencia_confirmar_envio, name="transferencia_confirmar_envio"),
+    path("transferenciaStatus/", views.transferencia_status, name="transferencia_status"),
+    path("transferenciaWebhook/", views.transferencia_webhook, name="transferencia_webhook"),
 ]
