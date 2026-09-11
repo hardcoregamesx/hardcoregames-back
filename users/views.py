@@ -244,7 +244,7 @@ def token_pass(request, self=None):
             if old_token:
                 cache.delete(f"password_reset_token:{old_token}")
 
-            timeout_seconds = 60
+            timeout_seconds = 15 * 60
             cache.set(token_key, username, timeout=timeout_seconds)
             cache.set(user_key, token, timeout=timeout_seconds)
 
