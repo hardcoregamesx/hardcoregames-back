@@ -21,6 +21,7 @@ POINT_TRANSACTION_REASONS = [
     ('EXCHANGE', 'Canje por saldo'),
     ('ADMIN_ADJUST', 'Ajuste administrativo'),
     ('REFUND', 'Devolución'),
+    ('YOUTUBE_MEMBER_CLAIM', 'Reclamo semanal de miembro YouTube'),
 ]
 
 PRIZE_TYPES = [
@@ -57,12 +58,17 @@ class PointTransaction(models.Model):
 
 
 class Roulette(models.Model):
-    """Una rueda configurable. En la practica solo una activa a la vez."""
+    """Una rueda configurable. Puede haber mas de una activa a la vez: la
+    ruleta VIP (`requires_membership=True`) reusa esta misma tabla en vez de
+    duplicar el modelo, distinguida por ese flag y con tope mensual en lugar
+    de diario."""
 
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
     cost_points = models.IntegerField(default=0)
     max_spins_per_day = models.IntegerField(null=True, blank=True)
+    requires_membership = models.BooleanField(default=False, help_text='Solo miembros de YouTube con membresía activa pueden ver/girar esta ruleta.')
+    max_spins_per_month = models.IntegerField(null=True, blank=True, help_text='Alternativa a max_spins_per_day para ruletas de cadencia mensual (ej. la VIP).')
     created_at = models.DateTimeField()
 
     class Meta:
