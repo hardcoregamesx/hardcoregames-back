@@ -337,7 +337,7 @@ def validate_email_token(request, self=None):
     if request.method == "POST":
         body = GetJsonFromRequest.__int__(self, request)
         username = body.get("username", body.get("email", ""))
-        token = body["token"]
+        token = str(body["token"]).strip().lower()
         token_reason = body.get("reason", "email_validation_token")  # Default reason if not provided
 
         token_key = f"{token_reason}:{token}"
