@@ -348,6 +348,15 @@ def validate_email_token(request, self=None):
                 JsonResponse({'message': 'token inválido', "status": 200, "code": "01"}),
                 content_type="application/json")
 
+        if token_reason == "password_reset_token":
+            # No se consume aqui: es solo el paso de "ingresa el codigo" en el
+            # frontend. El consumo real (de un solo uso) ocurre en
+            # confirm_password_reset, llamado por FastAPI justo antes de
+            # cambiar la contrasena -- ver ese endpoint para el detalle.
+            return HttpResponse(
+                JsonResponse({'message': 'token válido', "status": 200, "code": "00"}),
+                content_type="application/json")
+
         # Token válido: eliminarlo para que sea de un solo uso
         cache.delete(token_key)
         user_key = f"email_validation_user:{username}"
@@ -362,3 +371,33 @@ def validate_email_token(request, self=None):
             JsonResponse({'message': 'token válido', "status": 200, "code": "00"}),
             content_type="application/json")
 
+
+@csrf_exempt
+def confirm_password_reset(request, self=None):
+    """Consumo real (de un solo uso) del token de password reset.
+
+    Pensado para ser llamado solo por hc-fastapi, por red interna, justo
+    antes de cambiar la contrasena en /auth/reset-password.
+    validate_email_token ya confirma el formato/vigencia del codigo para la
+    UI, pero no lo borra para este caso -- este endpoint es el que de
+    verdad lo invalida.
+    """
+    if request.method == "POST":
+        body = GetJsonFromRequest.__int__(self, request)
+        username = body.get("username", body.get("email", ""))
+        token = str(body.get("token", "")).strip().lower()
+
+        token_key = f"password_reset_token:{token}"
+        user_from_cache = cache.get(token_key)
+
+        if user_from_cache is None or user_from_cache != username:
+            return HttpResponse(
+                JsonResponse({'message': 'token inválido', "status": 200, "code": "01"}),
+                content_type="application/json")
+
+        cache.delete(token_key)
+        cache.delete(f"password_reset_user:{username}")
+
+        return HttpResponse(
+            JsonResponse({'message': 'token válido', "status": 200, "code": "00"}),
+            content_type="application/json")

@@ -15,4 +15,5 @@ urlpatterns = [
     path("tokenPass/", views.token_pass, name="token_pass"),
     path("createEmailValidationToken/", views.create_email_validation_token, name="create_email_validation_token"),
     path("validateEmailToken/", views.validate_email_token, name="validate_email_token"),
+    path("confirmPasswordReset/", views.confirm_password_reset, name="confirm_password_reset"),
 ]
