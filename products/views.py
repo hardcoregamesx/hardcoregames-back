@@ -1461,14 +1461,19 @@ def _calculate_cart_amount(parsed_transaction):
             if not eligible_ids or i['id_combination'] in eligible_ids
         ]
 
-        # When the coupon requires the gift's licencia (Primaria/Secundaria)
-        # to match the licencia of the anchor product that unlocked it —
-        # e.g. "compra Primaria, regala Primaria; compra Secundaria, regala
-        # Secundaria" — a gift item only stays eligible if the cart also has
-        # an anchor item (one of requires_product's product_ids) with that
-        # same licencia. Two Primaria+Secundaria anchors in the same cart
-        # unlock both licencias for the gift.
-        if coupon.rules.filter(rule_type='matching_license_to_anchor').exists():
+        # When the coupon restricts which gift licencia (Primaria/Secundaria)
+        # an anchor's licencia unlocks, a gift item only stays eligible if
+        # the cart also has an anchor item (one of requires_product's
+        # product_ids) whose licencia unlocks it. The unlock map defaults to
+        # strict identity (compra Primaria -> regala Primaria only; compra
+        # Secundaria -> regala Secundaria only) unless the rule's `value`
+        # gives an explicit `unlocks` map — e.g. PROMO2X1 sets Primaria to
+        # unlock both Primaria and Secundaria (a Primaria buyer may also take
+        # the cheaper Secundaria gift), while Secundaria still unlocks only
+        # Secundaria, so a cheap anchor can never reach an expensive gift.
+        # Multiple anchors in the same cart union their unlocked licencias.
+        license_rule = coupon.rules.filter(rule_type='matching_license_to_anchor').first()
+        if license_rule is not None:
             anchor_product_ids = set()
             for rule in coupon.rules.filter(rule_type='requires_product'):
                 anchor_product_ids |= set((rule.value or {}).get('product_ids', []))
@@ -1477,9 +1482,14 @@ def _calculate_cart_amount(parsed_transaction):
                 for i in cart_items
                 if game_details[i['id_combination']].producto_id in anchor_product_ids
             }
+            unlocks_map = (license_rule.value or {}).get('unlocks') or {}
+            unlocked_gift_licenses = set()
+            for lic in anchor_licenses:
+                allowed = unlocks_map.get(str(lic))
+                unlocked_gift_licenses |= set(allowed) if allowed is not None else {lic}
             eligible_items = [
                 i for i in eligible_items
-                if game_details[i['id_combination']].licencia_id in anchor_licenses
+                if game_details[i['id_combination']].licencia_id in unlocked_gift_licenses
             ]
 
         # A coupon can cap how many matching cart items actually receive the
