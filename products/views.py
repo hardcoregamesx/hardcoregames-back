@@ -1552,6 +1552,24 @@ def _calculate_cart_amount(parsed_transaction):
     return user_id, calculated_amount, cart_items, None, membership_discount
 
 
+# Tarifa de servicio para tarjeta/PSE vía Bold: replica exacta de
+# CARD_FEE_PERCENT/CARD_FEE_FIXED en frontend-v2/src/components/CheckoutPage.tsx
+# (bold.co/tarifas, feb 2026: ~2.99%+$900 COP + 19% IVA). El frontend la suma
+# al total para mostrarla y para lo que le pide a Bold que cobre, pero nunca se
+# confía en el monto que declara el cliente (misma regla que el resto de este
+# archivo) -- aquí se recalcula server-side y solo se acepta el total del
+# catálogo o ese mismo total + esta tarifa exacta, nada más. Sin esto,
+# generate_hash_bold rechazaba TODO pago con tarjeta con "El monto no coincide
+# con el carrito" en cuanto el frontend empezó a sumar la tarifa (bug real,
+# 12/09/2026).
+CARD_FEE_PERCENT = 0.0356
+CARD_FEE_FIXED = 1100
+
+
+def _compute_card_fee(net_amount):
+    return round(net_amount * CARD_FEE_PERCENT) + CARD_FEE_FIXED
+
+
 @csrf_exempt
 def generate_hash_bold(request):
     if request.method != "POST":
@@ -1582,17 +1600,22 @@ def generate_hash_bold(request):
     except (TypeError, ValueError):
         return JsonResponse({"error": "amount inválido"}, status=400)
 
-    if received_amount != calculated_amount:
+    amount_with_card_fee = calculated_amount + _compute_card_fee(calculated_amount)
+    if received_amount == calculated_amount:
+        final_amount = calculated_amount
+    elif received_amount == amount_with_card_fee:
+        final_amount = amount_with_card_fee
+    else:
         logger.warning(
-            "generate_hash_bold: monto no coincide (recibido=%s calculado=%s user_id=%s)",
-            received_amount, calculated_amount, user_id,
+            "generate_hash_bold: monto no coincide (recibido=%s calculado=%s con_tarifa=%s user_id=%s)",
+            received_amount, calculated_amount, amount_with_card_fee, user_id,
         )
         return JsonResponse({"error": "El monto no coincide con el carrito"}, status=400)
 
     order_id = generate_order_id()
-    signature = generate_signature(order_id, calculated_amount, currency, settings.SECRET_KEY_BOLD)
+    signature = generate_signature(order_id, final_amount, currency, settings.SECRET_KEY_BOLD)
 
-    transaction = create_transaction_record(order_id, calculated_amount, request_transaction)
+    transaction = create_transaction_record(order_id, final_amount, request_transaction)
     _log_membership_discount(transaction, user_id, membership_discount)
 
     payload = build_payload(order_id, signature)
@@ -2066,7 +2089,7 @@ def transferencia_create(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction invalido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response = _calculate_cart_amount(parsed_transaction)
+    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
 
@@ -2085,6 +2108,7 @@ def transferencia_create(request):
         request=stored_request,
         user_id=User.objects.filter(pk=user_id).first(),
     )
+    _log_membership_discount(transaction, user_id, membership_discount)
 
     registered = _pagos_nequi_call("POST", "/api/expectations", {
         "transaction_id": order_id,
