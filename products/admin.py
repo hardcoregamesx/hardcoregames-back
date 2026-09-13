@@ -209,13 +209,16 @@ class ProductsAdmin(admin.ModelAdmin):
 
     @staticmethod
     def console(obj):
-        game_inventory = (
-            GameDetail.objects.filter(
-                producto__id_product=obj.id_product
-            ).distinct('consola')
-        )
-        return ", ".join(str(result.consola) for result in game_inventory) \
-            if game_inventory is not None else None
+        # Muestra la(s) plataforma(s) elegidas en el panel de admin
+        # (Products.consola) en vez de inferirlas del inventario cargado
+        # (GameDetail.consola). El inventario puede quedar mal etiquetado
+        # (ej. la subida de Excel de Xbox fuerza consola=Xbox en varias
+        # columnas sin importar la plataforma real del producto), pero eso
+        # es un tema de datos internos de stock/checkout que no se toca
+        # aqui: esta columna es solo visual, para que el admin vea la
+        # plataforma que el mismo configuro para el producto.
+        platforms = obj.consola.all()
+        return ", ".join(str(c) for c in platforms) if platforms else None
 
     @staticmethod
     def duration_days(obj):
