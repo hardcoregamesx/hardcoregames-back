@@ -149,14 +149,43 @@ def process_batch_xbx(sheet, start, end, id_xbox, id_code, id_pc, licence_pc, id
             id_product,
         )
 
-        for key, console, license_type in [
-            ("xbox_1", id_xbox, id_primaria),
-            ("xbox_2", id_xbox, id_secundaria),
-            ("pc", id_pc, licence_pc),
-            ("code", id_xbox, id_code),
+        # Las columnas xbox_1/xbox_2/code son precios de cuenta compartida o
+        # de codigo, no necesariamente de Xbox: deberian aplicar a la(s)
+        # plataforma(s) reales del producto (Products.consola, elegidas en
+        # el panel de admin), no siempre a Xbox. Antes se forzaba Xbox para
+        # cualquier producto subido por esta hoja, y por eso un producto
+        # PC-only (ej. id 316, GAME PASS PC) terminaba con inventario
+        # fantasma etiquetado como Xbox en el catalogo.
+        #
+        # Los productos de suscripcion (type_id_id=3: Crunchyroll, HBO Max,
+        # etc.) quedan fuera de este arreglo a proposito: ese flujo de
+        # checkout depende de que las cuentas queden con consola=Xbox (ver
+        # comentario en views.py build_div_html) y no hay certeza de que
+        # ese mismo supuesto no se repita en el servicio FastAPI. No tocar
+        # ese caso hasta confirmarlo.
+        if product_for_create.type_id_id == 3:
+            consoles_for_shared_licences = list(id_xbox)
+        else:
+            consoles_for_shared_licences = list(product_for_create.consola.all()) or list(id_xbox)
+
+        for key, license_type in [
+            ("xbox_1", id_primaria),
+            ("xbox_2", id_secundaria),
+            ("code", id_code),
         ]:
-            if check_sheet_price(sheet_prices[key]):
-                save_or_update_game_detail(id_product, console, license_type, duration_days, account_for_producto)
+            if not check_sheet_price(sheet_prices[key]):
+                continue
+            for consola in consoles_for_shared_licences:
+                save_or_update_game_detail(
+                    id_product,
+                    Consoles.objects.filter(pk=consola.pk),
+                    license_type,
+                    duration_days,
+                    account_for_producto,
+                )
+
+        if check_sheet_price(sheet_prices["pc"]):
+            save_or_update_game_detail(id_product, id_pc, licence_pc, duration_days, account_for_producto)
 
 class ManegePricesFile:
     def __init__(self, files_id=None):
