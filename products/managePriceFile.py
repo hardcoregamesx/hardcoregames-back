@@ -150,23 +150,31 @@ def process_batch_xbx(sheet, start, end, id_xbox, id_code, id_pc, licence_pc, id
         )
 
         # Las columnas xbox_1/xbox_2/code son precios de cuenta compartida o
-        # de codigo, no necesariamente de Xbox: deberian aplicar a la(s)
-        # plataforma(s) reales del producto (Products.consola, elegidas en
-        # el panel de admin), no siempre a Xbox. Antes se forzaba Xbox para
-        # cualquier producto subido por esta hoja, y por eso un producto
-        # PC-only (ej. id 316, GAME PASS PC) terminaba con inventario
-        # fantasma etiquetado como Xbox en el catalogo.
+        # de codigo. Por defecto van a la consola generica "xbox" (id 5),
+        # que es la que usa TODO el inventario compartido existente del
+        # catalogo (cientos de filas). Products.consola puede traer
+        # plataformas mas especificas para un mismo producto Xbox (ej. id 4
+        # GAME PASS ULTIMATE tiene "Xbox Series" + "Xbox One" ahi, solo como
+        # informacion de compatibilidad para la ficha del producto) — usar
+        # esas plataformas especificas en vez de "xbox" fragmenta el
+        # inventario en subconsolas nuevas y confunde al cliente (pasó con
+        # el id 4 el 13/09/2026, revertido).
         #
-        # Los productos de suscripcion (type_id_id=3: Crunchyroll, HBO Max,
-        # etc.) quedan fuera de este arreglo a proposito: ese flujo de
-        # checkout depende de que las cuentas queden con consola=Xbox (ver
-        # comentario en views.py build_div_html) y no hay certeza de que
-        # ese mismo supuesto no se repita en el servicio FastAPI. No tocar
-        # ese caso hasta confirmarlo.
-        if product_for_create.type_id_id == 3:
+        # Solo se usa la plataforma real del producto cuando NINGUNA de sus
+        # consolas asignadas pertenece a la familia Xbox (ej. id 316, GAME
+        # PASS PC, con Products.consola = [Pc]) — ahi si hacia falta dejar
+        # de forzar Xbox. Los productos de suscripcion (type_id_id=3:
+        # Crunchyroll, HBO Max, etc.) tambien quedan fuera a proposito: ese
+        # flujo de checkout depende de que las cuentas queden con
+        # consola=Xbox (ver comentario en views.py build_div_html) y no hay
+        # certeza de que ese mismo supuesto no se repita en el servicio
+        # FastAPI. No tocar ese caso hasta confirmarlo.
+        product_consoles = list(product_for_create.consola.all())
+        es_familia_xbox = any("xbox" in (c.descripcion or "").lower() for c in product_consoles)
+        if product_for_create.type_id_id == 3 or es_familia_xbox or not product_consoles:
             consoles_for_shared_licences = list(id_xbox)
         else:
-            consoles_for_shared_licences = list(product_for_create.consola.all()) or list(id_xbox)
+            consoles_for_shared_licences = product_consoles
 
         for key, license_type in [
             ("xbox_1", id_primaria),
