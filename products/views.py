@@ -752,6 +752,8 @@ def system_variables(request, variable):
     if request.method == "GET":
         system_variables = VariablesSistema.objects.filter(nombre_variable=variable, estado=True)
         serializer = SerializerForVariables(system_variables, many=True)
+        if not serializer.data:
+            return JsonResponse({'message': 'variable no encontrada', 'code': '01', 'status': 404}, status=404)
         payload = {'message': 'proceso exitoso', 'data': serializer.data[0], 'code': '00', 'status': 200}
         return HttpResponse(JsonResponse(payload), content_type="application/json")
 
