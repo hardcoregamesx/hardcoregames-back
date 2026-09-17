@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django import forms
 from django.db import models
 from django.db.models import Sum
+from django.utils import timezone
 from django.urls import reverse, path
 from django.utils.html import format_html
 from django.shortcuts import redirect, get_object_or_404, render
@@ -18,7 +19,7 @@ from products.formProducts import ProductsFormCreate
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ProductsType, SaleDetail, ProductAccounts, Files, GameDetail, Consoles, \
     TypeGames, VariablesSistema, Licenses, TypeAccounts, Coupon, CouponRule, CouponRedemption, ProductoDestacado, \
-    GameDetailInventario, ProductAlias, CouponPurgeLog, ProductoOfertaSemana
+    GameDetailInventario, ProductAlias, CouponPurgeLog, ProductoOfertaSemana, PaymentPlan, PaymentInstallment
 from django.contrib.admin import DateFieldListFilter
 from products.UpdateProductForm import UpdateProductForm
 @admin.action(description="Update price and other fields")
@@ -85,7 +86,7 @@ class ProductsAdmin(admin.ModelAdmin):
     list_display = ('id_product','title','stock_primaries', 'price_primaries',
                     'stock_secondaries', 'price_secondaries',
                     'stock_codes', 'price_codes',
-                    'stock_pc', 'price_pc', 'console', 'duration_days')
+                    'stock_pc', 'price_pc', 'console', 'duration_days', 'fecha_lanzamiento')
 
     @staticmethod
     def product_id(obj):
@@ -324,6 +325,25 @@ class GameDetailAdmin(admin.ModelAdmin):
             update_fields['precio'] = new_price
         if price_off:
             update_fields['precio_descuento'] = price_off
+
+        # Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.2). Checkboxes no
+        # aparecen en POST cuando quedan destildados, por eso se leen con
+        # 'in request.POST' en vez de .get(...) -- igual que el resto de este
+        # metodo, se propagan al mismo grupo producto+licencia+duracion que
+        # ya comparte precio/precio_descuento.
+        update_fields['cuotas_activas'] = 'cuotas_activas' in request.POST
+        update_fields['reserva_activa'] = 'reserva_activa' in request.POST
+        num_cuotas = request.POST.get('num_cuotas')
+        if num_cuotas:
+            update_fields['num_cuotas'] = num_cuotas
+        valor_cuota = request.POST.get('valor_cuota')
+        if valor_cuota:
+            update_fields['valor_cuota'] = valor_cuota
+        update_fields['cuota_inicial'] = request.POST.get('cuota_inicial') or None
+        monto_reserva = request.POST.get('monto_reserva')
+        if monto_reserva:
+            update_fields['monto_reserva'] = monto_reserva
+
         if update_fields:
             game_details.update(**update_fields)
 
@@ -367,6 +387,16 @@ class GameDetailAdmin(admin.ModelAdmin):
         ('Información de Cuenta', {
             'fields': ('account_name', 'account_password', 'account_stock'),
             'description': 'Datos de la cuenta asociada a este GameDetail.',
+        }),
+        ('Cuotas y reserva', {
+            'fields': ('cuotas_activas', 'num_cuotas', 'valor_cuota', 'cuota_inicial',
+                      'reserva_activa', 'monto_reserva'),
+            'description': (
+                'Cuotas: solo aplica a licencia Primaria o Secundaria, nunca a keys/códigos. '
+                'Si "Cuota inicial" queda vacío, la inicial vale igual que las demás cuotas. '
+                'Reserva: solo se puede activar si el producto (arriba) tiene una fecha de '
+                'lanzamiento futura -- ver el campo "Fecha de lanzamiento" en Productos.'
+            ),
         }),
     )
 
@@ -638,6 +668,102 @@ class SalesDetailAdmin(admin.ModelAdmin):
     search_fields = ["usuario__email", "fecha_venta"]
     list_per_page = 10
 
+
+# ------------------------------------------------------------------ #
+#  Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.2)                #
+# ------------------------------------------------------------------ #
+
+class PaymentInstallmentInline(admin.TabularInline):
+    model = PaymentInstallment
+    extra = 0
+    fields = ('numero', 'monto', 'mora', 'fecha_vencimiento', 'estado', 'fecha_pago', 'metodo')
+    readonly_fields = ('numero',)
+    can_delete = False
+    ordering = ('numero',)
+
+
+class PaymentPlanAdmin(admin.ModelAdmin):
+    list_display = ('id', 'usuario_email', 'titulo_snapshot', 'tipo', 'estado', 'precio_total',
+                    'total_pagado', 'proximo_vencimiento', 'retirado')
+    list_filter = ('tipo', 'estado', 'retirado')
+    search_fields = ('user__email', 'titulo_snapshot', 'token')
+    inlines = [PaymentInstallmentInline]
+    readonly_fields = ('token', 'transaction_origen', 'saledetail', 'fecha_creacion', 'gamedetail')
+    actions = ['perdonar_mora', 'cancelar_plan', 'retirar_producto', 'reactivar_producto']
+
+    @admin.display(description='Usuario')
+    def usuario_email(self, obj):
+        return obj.user.email if obj.user else '—'
+
+    @admin.display(description='Próximo vencimiento')
+    def proximo_vencimiento(self, obj):
+        proxima = obj.cuotas.filter(estado=PaymentInstallment.ESTADO_PENDIENTE).order_by('numero').first()
+        return proxima.fecha_vencimiento if proxima else None
+
+    def save_formset(self, request, form, formset, change):
+        """Guarda las cuotas del inline (ej. marcar una como pagada
+        manualmente desde el admin) y recalcula total_pagado/estado/
+        mora_acumulada del plan -- ver docs/cuotas-y-reserva.md §4.2,
+        acción 'Marcar cuota seleccionada como pagada (manual)'."""
+        instances = formset.save(commit=False)
+        for instance in instances:
+            if (isinstance(instance, PaymentInstallment)
+                    and instance.estado == PaymentInstallment.ESTADO_PAGADA and not instance.fecha_pago):
+                instance.fecha_pago = timezone.now()
+                if not instance.metodo:
+                    instance.metodo = 'manual'
+            instance.save()
+        for obj in formset.deleted_objects:
+            obj.delete()
+        formset.save_m2m()
+        self._recalcular_plan(form.instance)
+
+    @staticmethod
+    def _recalcular_plan(plan):
+        plan.refresh_from_db()
+        pagadas = plan.cuotas.filter(estado=PaymentInstallment.ESTADO_PAGADA)
+        plan.total_pagado = sum(c.monto for c in pagadas)
+        plan.mora_acumulada = sum(
+            c.mora for c in plan.cuotas.filter(estado=PaymentInstallment.ESTADO_PENDIENTE)
+        )
+        if plan.retirado:
+            plan.estado = PaymentPlan.ESTADO_RETIRADO
+        elif plan.total_pagado + plan.descuento >= plan.precio_total:
+            plan.estado = PaymentPlan.ESTADO_COMPLETADO
+        elif plan.tipo == PaymentPlan.TIPO_CUOTAS:
+            hay_vencidas = plan.cuotas.filter(
+                estado=PaymentInstallment.ESTADO_PENDIENTE, fecha_vencimiento__lt=date.today(),
+            ).exists()
+            plan.estado = PaymentPlan.ESTADO_EN_MORA if hay_vencidas else PaymentPlan.ESTADO_ACTIVO
+        plan.fecha_actualizacion = timezone.now()
+        plan.save()
+
+    @admin.action(description='Perdonar mora de los planes seleccionados')
+    def perdonar_mora(self, request, queryset):
+        for plan in queryset:
+            plan.cuotas.filter(estado=PaymentInstallment.ESTADO_PENDIENTE).update(mora=0)
+            plan.mora_acumulada = 0
+            plan.mora_exenta = True
+            plan.fecha_actualizacion = timezone.now()
+            plan.save()
+        messages.success(request, "Mora perdonada en los planes seleccionados.")
+
+    @admin.action(description='Cancelar plan')
+    def cancelar_plan(self, request, queryset):
+        queryset.update(estado=PaymentPlan.ESTADO_CANCELADO, fecha_actualizacion=timezone.now())
+        messages.success(request, "Planes cancelados.")
+
+    @admin.action(description='Retirar producto (falta de pago)')
+    def retirar_producto(self, request, queryset):
+        queryset.update(retirado=True, fecha_actualizacion=timezone.now())
+        messages.success(request, "Producto(s) retirado(s). Se oculta la credencial en /purchases.")
+
+    @admin.action(description='Reactivar producto retirado')
+    def reactivar_producto(self, request, queryset):
+        queryset.update(retirado=False, fecha_actualizacion=timezone.now())
+        messages.success(request, "Producto(s) reactivado(s).")
+
+
 admin.site.site_header = 'Administración HardCoreGames'
 # Register your models here.
 admin.site.register(Products, ProductsAdmin)
@@ -651,6 +777,7 @@ admin.site.register(TypeGames, TypeGamesAdmin)
 admin.site.register(TypeAccounts, TypeAccountsAdmin)
 admin.site.register(VariablesSistema, SystemVariablesAdmin)
 admin.site.register(Licenses, LicencesAdmin)
+admin.site.register(PaymentPlan, PaymentPlanAdmin)
 # ------------------------------------------------------------------ #
 #  Coupon admin                                                        #
 # ------------------------------------------------------------------ #

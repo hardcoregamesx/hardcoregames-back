@@ -1,6 +1,6 @@
 from django.urls import path
 
-from products import views
+from products import views, views_planes
 
 urlpatterns = [
     path("getAllProducts/", views.get_all_products, name="get_all_products"),
@@ -44,4 +44,11 @@ urlpatterns = [
     path("transferenciaConfirmarEnvio/", views.transferencia_confirmar_envio, name="transferencia_confirmar_envio"),
     path("transferenciaStatus/", views.transferencia_status, name="transferencia_status"),
     path("transferenciaWebhook/", views.transferencia_webhook, name="transferencia_webhook"),
+    # Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.4): pago de cuotas
+    # siguientes. La creación del plan y su primera cuota se hacen en el
+    # checkout normal (confirm_sale); estos endpoints solo cobran cuotas ya
+    # existentes.
+    path("planes/cuotaTransferenciaCreate/", views_planes.cuota_transferencia_create,
+        name="cuota_transferencia_create"),
+    path("planes/cuotaBoldHash/", views_planes.cuota_bold_hash, name="cuota_bold_hash"),
 ]

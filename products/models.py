@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 
 from django.conf import settings
@@ -62,6 +63,10 @@ class Products(models.Model):
     puede_rentarse = models.BooleanField(default=True)
     destacado = models.BooleanField(default=False)
     oferta_semana = models.BooleanField(default=False)
+    # Cuotas y reserva (ver docs/cuotas-y-reserva.md §3/§4.1): fecha en la que
+    # el producto "sale" -- solo relevante para variantes con reserva_activa,
+    # que exigen que esta fecha exista y sea futura.
+    fecha_lanzamiento = models.DateField(null=True, blank=True)
 
     def __str__(self):
         return str(self.id_product) + " " + str(self.title)
@@ -137,6 +142,16 @@ class GameDetail(models.Model):
     stock = models.IntegerField()
     precio = models.IntegerField(default=0)
     precio_descuento = models.IntegerField(default=0)
+    # Cuotas y reserva (ver docs/cuotas-y-reserva.md §3/§4.1). Solo tienen
+    # efecto real para licencia Primaria/Secundaria (id 1/2); validado en el
+    # admin (GameDetailAdmin.clean), no aquí, para no romper cargas masivas
+    # por Excel que no tocan estos campos.
+    cuotas_activas = models.BooleanField(default=False)
+    num_cuotas = models.IntegerField(default=3)
+    valor_cuota = models.IntegerField(default=0)
+    cuota_inicial = models.IntegerField(null=True, blank=True)
+    reserva_activa = models.BooleanField(default=False)
+    monto_reserva = models.IntegerField(default=20000)
 
     class Meta:
         verbose_name = 'Precio por consola y licencia'
@@ -145,6 +160,28 @@ class GameDetail(models.Model):
     def __str__(self):
         product_name = self.producto.title if self.producto else 'Sin producto'
         return f"{product_name} | {self.licencia} | {self.consola} | {self.duracion_dias_alquiler}"
+
+    def precio_contado(self):
+        """Precio de hoy si se compra de contado: el de oferta si hay una
+        vigente, si no el de lista. Misma regla que usa el checkout en
+        _calculate_cart_amount, repetida aquí para que el admin/otros
+        consumidores del modelo no tengan que reimplementarla."""
+        return self.precio_descuento if 0 < self.precio_descuento < self.precio else self.precio
+
+    def plan_cuotas(self):
+        """Dict {inicial, valor_cuota, num_cuotas, total} con el armado de
+        cuotas de esta variante (ver docs/cuotas-y-reserva.md §3.2), o None
+        si la variante no tiene cuotas activas o está mal configurada."""
+        if not self.cuotas_activas or self.valor_cuota <= 0 or self.num_cuotas < 2:
+            return None
+        inicial = self.cuota_inicial if self.cuota_inicial else self.valor_cuota
+        total = inicial + self.valor_cuota * (self.num_cuotas - 1)
+        return {
+            'inicial': inicial,
+            'valor_cuota': self.valor_cuota,
+            'num_cuotas': self.num_cuotas,
+            'total': total,
+        }
 
 
 class SaleDetail(models.Model):
@@ -169,6 +206,10 @@ class ShoppingCar(models.Model):
     producto = models.ForeignKey(GameDetail, on_delete=models.CASCADE)
     usuario = models.ForeignKey(User, on_delete=models.CASCADE)
     estado = models.BooleanField()
+    # 'contado' | 'cuotas' | 'reserva'. Default 'contado' para no romper
+    # carritos ya guardados antes de esta migración (ver
+    # docs/cuotas-y-reserva.md §3/§4.1).
+    modo_pago = models.CharField(max_length=10, default='contado')
 
     # def __str__(self):
     #     return "Detalle de venta para la cuenta " + self.cuenta.cuenta
@@ -636,3 +677,136 @@ class ProductAlias(models.Model):
 
     def __str__(self):
         return self.alias
+
+
+# ------------------------------------------------------------------ #
+#  Cuotas y reserva (ver docs/cuotas-y-reserva.md)                    #
+# ------------------------------------------------------------------ #
+
+def generar_token_plan():
+    """Token opaco para el enlace de pago sin login
+    (https://www.hardcoregames.co/pagos/<token>). 32 bytes url-safe: la
+    probabilidad de colisión es despreciable, no hace falta reintentar."""
+    return secrets.token_urlsafe(32)
+
+
+class PaymentPlan(models.Model):
+    """Un plan de cuotas o de reserva sobre una variante (GameDetail). Tabla
+    creada a mano vía SQL directo (ver products/sql/2026-09-cuotas-reserva.sql),
+    igual que ProductAlias/CouponPurgeLog -- managed = False evita que
+    aparezca en makemigrations/migrate en esta app, que no tiene migraciones."""
+
+    TIPO_CUOTAS = 'cuotas'
+    TIPO_RESERVA = 'reserva'
+    TIPO_CHOICES = (
+        (TIPO_CUOTAS, 'Cuotas'),
+        (TIPO_RESERVA, 'Reserva'),
+    )
+
+    ESTADO_ACTIVO = 'activo'
+    ESTADO_COMPLETADO = 'completado'
+    ESTADO_EN_MORA = 'en_mora'
+    ESTADO_RETIRADO = 'retirado'
+    ESTADO_CANCELADO = 'cancelado'
+    ESTADO_ESPERANDO_STOCK = 'esperando_stock'
+    ESTADO_ASIGNADO = 'asignado'
+    ESTADO_PENDIENTE_PAGO = 'pendiente_pago'
+    ESTADO_CHOICES = (
+        (ESTADO_ACTIVO, 'Activo'),
+        (ESTADO_COMPLETADO, 'Completado'),
+        (ESTADO_EN_MORA, 'En mora'),
+        (ESTADO_RETIRADO, 'Retirado'),
+        (ESTADO_CANCELADO, 'Cancelado'),
+        (ESTADO_ESPERANDO_STOCK, 'Esperando stock'),
+        (ESTADO_ASIGNADO, 'Asignado'),
+        (ESTADO_PENDIENTE_PAGO, 'Pendiente de pago'),
+    )
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, db_column='user_id', related_name='payment_plans')
+    gamedetail = models.ForeignKey(
+        GameDetail, on_delete=models.DO_NOTHING, db_column='gamedetail_id', related_name='payment_plans'
+    )
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES)
+    titulo_snapshot = models.CharField(max_length=300, default='', blank=True)
+    precio_total = models.IntegerField()
+    descuento = models.IntegerField(default=0)
+    num_cuotas = models.IntegerField(default=1)
+    valor_cuota = models.IntegerField(default=0)
+    cuota_inicial = models.IntegerField(null=True, blank=True)
+    monto_reserva = models.IntegerField(null=True, blank=True)
+    total_pagado = models.IntegerField(default=0)
+    mora_acumulada = models.IntegerField(default=0)
+    mora_exenta = models.BooleanField(default=False)
+    retirado = models.BooleanField(default=False)
+    token = models.CharField(max_length=64, unique=True, default=generar_token_plan)
+    transaction_origen = models.ForeignKey(
+        Transactions, null=True, blank=True, on_delete=models.DO_NOTHING,
+        db_column='transaction_origen_id', related_name='planes_originados',
+    )
+    saledetail = models.ForeignKey(
+        SaleDetail, null=True, blank=True, on_delete=models.DO_NOTHING,
+        db_column='saledetail_id', related_name='payment_plan',
+    )
+    cuenta_asignada = models.ForeignKey(
+        ProductAccounts, null=True, blank=True, on_delete=models.DO_NOTHING,
+        db_column='cuenta_asignada_id', related_name='planes_asignados',
+    )
+    fecha_asignacion = models.DateTimeField(null=True, blank=True)
+    fecha_limite_pago = models.DateTimeField(null=True, blank=True)
+    notas = models.TextField(default='', blank=True)
+    fecha_creacion = models.DateTimeField(default=timezone.now)
+    fecha_actualizacion = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = False
+        db_table = 'products_paymentplan'
+        verbose_name = 'plan de pago'
+        verbose_name_plural = 'Planes de pago (cuotas y reserva)'
+
+    def __str__(self):
+        return f'Plan #{self.pk} ({self.get_tipo_display()}) — {self.titulo_snapshot}'
+
+    def esta_completado(self):
+        return self.total_pagado + self.descuento >= self.precio_total
+
+
+class PaymentInstallment(models.Model):
+    """Una cuota (o el saldo de una reserva) dentro de un PaymentPlan. Misma
+    nota de managed=False que PaymentPlan."""
+
+    ESTADO_PENDIENTE = 'pendiente'
+    ESTADO_PAGADA = 'pagada'
+    ESTADO_CANCELADA = 'cancelada'
+    ESTADO_CHOICES = (
+        (ESTADO_PENDIENTE, 'Pendiente'),
+        (ESTADO_PAGADA, 'Pagada'),
+        (ESTADO_CANCELADA, 'Cancelada'),
+    )
+
+    id = models.AutoField(primary_key=True)
+    plan = models.ForeignKey(PaymentPlan, on_delete=models.CASCADE, db_column='plan_id', related_name='cuotas')
+    numero = models.IntegerField()
+    monto = models.IntegerField()
+    mora = models.IntegerField(default=0)
+    fecha_vencimiento = models.DateField(null=True, blank=True)
+    estado = models.CharField(max_length=12, default=ESTADO_PENDIENTE, choices=ESTADO_CHOICES)
+    fecha_pago = models.DateTimeField(null=True, blank=True)
+    transaction = models.ForeignKey(
+        Transactions, null=True, blank=True, on_delete=models.DO_NOTHING, db_column='transaction_id',
+        related_name='pagos_cuota',
+    )
+    metodo = models.CharField(max_length=30, null=True, blank=True)
+    ultimo_recordatorio = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'products_paymentinstallment'
+        verbose_name = 'cuota de plan de pago'
+        verbose_name_plural = 'Cuotas de planes de pago'
+        unique_together = [('plan', 'numero')]
+        ordering = ['plan', 'numero']
+
+    def __str__(self):
+        return f'Cuota {self.numero} del plan #{self.plan_id}'

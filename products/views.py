@@ -23,6 +23,7 @@ from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
     TypeGames, GameDetail, ProductAccounts, SaleDetail, DaysForRentail, PriceForSuscription, TypeAccounts, \
     VariablesSistema, TypeSuscriptionAccounts, Transactions, Coupon, CouponRedemption
+from products import planes, emails_planes
 from products.productSerializers import ProductsSerializer, ProductSerializer, ShoppingCarSerializer, \
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
@@ -726,6 +727,9 @@ def sales_by_user(request, id_user):
                          SaleDetail.objects.filter(usuario=id_user,
                                                    fecha_vencimiento=None
                                                    ).order_by('-pk'))
+        # prefetch_related evita un query por fila para saber si tiene plan
+        # de cuotas (ver SerializerSales.plan_id/plan_retirado).
+        sales_by_user = sales_by_user.prefetch_related('payment_plan')
         serializer = SerializerSales(sales_by_user, many=True)
         payload = {'message': 'proceso exitoso', 'data': serializer.data, 'code': '00', 'status': 200}
         return HttpResponse(JsonResponse(payload), content_type="application/json")
@@ -767,46 +771,92 @@ def system_variables_group(request, variable):
 
 
 @csrf_exempt
-def confirm_sale(request_data):
+def confirm_sale(request_data, transaction=None):
+    """`transaction` es opcional (compatibilidad con el flujo viejo de
+    ePayco, que llama confirm_sale con el body crudo sin tener un objeto
+    Transactions a mano) -- Bold, Sistecrédito y transferencia sí lo pasan,
+    porque cuotas/reserva necesitan enlazar el plan a la transacción de
+    origen (transaction_origen_id) y avisarle a ventas (ver
+    docs/cuotas-y-reserva.md §4.3 y §7)."""
     try:
         json_request = json.loads(request_data)
         id_user = json_request['id_user']
         coupon_code = json_request.get('couponCode')
         user = User.objects.filter(pk=id_user).first()
         message_html = ""
+        cuotas_plan_html = ""
+        reserva_planes = []
+        ventas_items = []
+        hubo_no_contado = False
+
+        items_calculados_por_combo = {
+            ic.get('id_combination'): ic for ic in (json_request.get('items_calculados') or [])
+        }
 
         for item in json_request['data']:
 
             combination_selected:GameDetail = GameDetail.objects.filter(pk=item['id_combination']).first()
-            name_console:str = combination_selected.consola.descripcion
+
+            if not combination_selected:
+                global_exception_handler(request_data, None)
+                return False
+
+            modo_pago = (item.get('modo_pago') or 'contado').strip().lower()
+            calculo_item = items_calculados_por_combo.get(item['id_combination']) or {}
+            descuento_item = calculo_item.get('descuento') or 0
+            product_selected = combination_selected.producto
+
+            if modo_pago == 'reserva':
+                # Reserva: no se entrega nada, no se toca stock ni se crea
+                # SaleDetail -- solo se congela el precio y se crea el plan.
+                hubo_no_contado = True
+                plan = planes.crear_plan_reserva(combination_selected, user, descuento_item, transaction)
+                reserva_planes.append(plan)
+                ventas_items.append(planes.item_ventas_plan_inicial(plan, plan.total_pagado))
+                delete_shopping_product(item['id_combination'], id_user)
+                continue
+
+            # contado y cuotas se entregan igual, de inmediato.
+            name_console: str = combination_selected.consola.descripcion
             account_selected = combination_selected.cuenta
             item['days_rentail'] = combination_selected.duracion_dias_alquiler
 
-            if combination_selected:
-                product_selected = combination_selected.producto
-                if user and not user.is_superuser:
-                    combination_selected.stock = F('stock') - 1
-                    update_points_sale(
-                        id_user,
-                        product_selected.puntos_venta,
-                        reference_type='product',
-                        reference_id=product_selected.id_product,
-                        description=f'Compra: {product_selected.title}',
-                    )
-                    delete_shopping_product(item['id_combination'], id_user)
-                    combination_selected.save()
-                create_sale(item, id_user, account_selected)
-                message_html += build_div_html(product_selected, combination_selected, account_selected, name_console)
+            if user and not user.is_superuser:
+                combination_selected.stock = F('stock') - 1
+                update_points_sale(
+                    id_user,
+                    product_selected.puntos_venta,
+                    reference_type='product',
+                    reference_id=product_selected.id_product,
+                    description=f'Compra: {product_selected.title}',
+                )
+                delete_shopping_product(item['id_combination'], id_user)
+                combination_selected.save()
+            sale_detail = create_sale(item, id_user, account_selected)
+            message_html += build_div_html(product_selected, combination_selected, account_selected, name_console)
+
+            if modo_pago == 'cuotas':
+                hubo_no_contado = True
+                plan = planes.crear_plan_cuotas(combination_selected, user, descuento_item, transaction, sale_detail)
+                cuotas_plan_html += emails_planes.bloque_plan_cuotas_creado(plan)
+                ventas_items.append(planes.item_ventas_plan_inicial(plan, plan.total_pagado))
             else:
-                global_exception_handler(request_data, None)
-                return False
+                ventas_items.append(planes.item_ventas_contado(
+                    combination_selected, calculo_item.get('pago_hoy', 0) - descuento_item
+                ))
 
         order_id = ','.join(str(item['id_combination']) for item in json_request['data'])
         apply_coupon_points(coupon_code, id_user, order_id)
         deduct_balance_exchange(id_user, json_request.get('balanceApplied') or 0)
 
-        if message_html != "":
-            send_email_notification(id_user, message_html)
+        if message_html or cuotas_plan_html:
+            send_email_notification(id_user, message_html + cuotas_plan_html)
+        for plan in reserva_planes:
+            emails_planes.enviar_correo_reserva_confirmada(user, plan)
+
+        if hubo_no_contado:
+            planes.notificar_ventas_planes(transaction, ventas_items)
+
         return True
     except Exception as e:
         send_email = True
@@ -887,6 +937,7 @@ def create_sale(sale, id_user, account_selected):
         combinacion=combination
     )
     sale_detail.save()
+    return sale_detail
 
 
 def update_points_sale(id_user, points, reference_type=None, reference_id=None, description=''):
@@ -1390,8 +1441,13 @@ def process_bold_event(data):
         transaction.payment_id = franchise
         transaction.save()
 
-        request_data = transaction.request
-        confirm_sale(request_data)
+        # Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.4): si esta
+        # transacción es el pago de una cuota siguiente (no un checkout
+        # nuevo), confirmarla como tal en vez de confirm_sale.
+        if planes.transaction_es_cuota(transaction):
+            planes.confirm_installment_payment(transaction)
+        else:
+            confirm_sale(transaction.request, transaction=transaction)
 
     elif transaction.status == "approved":
         logger.info("Transaction already approved: %s", transaction_id)
@@ -1421,50 +1477,97 @@ def _get_membership_discount_percent(user_id):
     return link.tier, MEMBERSHIP_DISCOUNT_PERCENT.get(link.tier, 0)
 
 
-def _calculate_cart_amount(parsed_transaction):
+def _calculate_cart_amount(parsed_transaction, allow_plans=True):
     """Recalcula el total del carrito desde el catálogo real (precio, cupón,
     saldo, descuento VIP de miembro) -- nunca se toma de lo que declare el
     cliente. Usada tanto por Bold como por Sistecrédito para que el mismo
     bug de precio no pueda arreglarse en un lado y seguir abierto en el otro.
 
+    Cada ítem trae opcionalmente `modo_pago` ('contado' por defecto, para no
+    romper clientes viejos que no lo mandan). `allow_plans=False` (usado por
+    Sistecrédito) rechaza el carrito si algún ítem no es de contado -- ver
+    docs/cuotas-y-reserva.md §4.3.
+
     Devuelve (user_id, calculated_amount, cart_items, error_response,
-    membership_discount). Si algo no cuadra, error_response es un
-    JsonResponse listo para devolver y los demás valores son None.
-    `membership_discount` es None si no se aplicó, o
+    membership_discount, items_calculados). Si algo no cuadra,
+    error_response es un JsonResponse listo para devolver y los demás
+    valores son None. `membership_discount` es None si no se aplicó, o
     {'tier': ..., 'percent': ..., 'amount_saved': ...} si sí.
+    `items_calculados` es la lista `{id_combination, modo_pago, pago_hoy,
+    descuento}` que los flujos que crean Transactions guardan dentro del
+    JSON de `request` (ver §4.3).
     """
     user_id = parsed_transaction.get('id_user')
     cart_data = parsed_transaction.get('data') or []
     if not user_id or not cart_data:
-        return None, None, None, JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400), None
+        return None, None, None, JsonResponse({"error": "Carrito vacío o usuario inválido"}, status=400), None, None
 
     combination_ids = [item.get('id_combination') for item in cart_data]
     if not all(combination_ids):
-        return None, None, None, JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400), None
+        return None, None, None, JsonResponse({"error": "Combinación de producto inválida en el carrito"}, status=400), None, None
+
+    # Una misma variante no puede aparecer dos veces con modos distintos.
+    modos_por_combo = {}
+    for item in cart_data:
+        combo_id = item.get('id_combination')
+        modo = (item.get('modo_pago') or 'contado').strip().lower()
+        if combo_id in modos_por_combo and modos_por_combo[combo_id] != modo:
+            return None, None, None, JsonResponse(
+                {"error": "Un mismo producto no puede tener dos modos de pago distintos en el carrito"}, status=400
+            ), None, None
+        modos_por_combo[combo_id] = modo
 
     game_details = {
         gd.id_game_detail: gd
-        for gd in GameDetail.objects.filter(pk__in=combination_ids)
+        for gd in GameDetail.objects.filter(pk__in=combination_ids).select_related('producto', 'licencia', 'consola')
     }
     if len(game_details) != len(set(combination_ids)):
-        return None, None, None, JsonResponse({"error": "Uno o más productos ya no existen"}, status=400), None
+        return None, None, None, JsonResponse({"error": "Uno o más productos ya no existen"}, status=400), None, None
 
+    if not allow_plans and any(m != 'contado' for m in modos_por_combo.values()):
+        return None, None, None, JsonResponse(
+            {"error": "Sistecrédito no disponible para cuotas o reserva"}, status=400
+        ), None, None
+
+    today = date.today()
     cart_items = []
     calculated_subtotal = 0
     any_item_on_week_offer = False
     for combo_id in combination_ids:
         gd = game_details[combo_id]
+        modo_pago = modos_por_combo[combo_id]
         has_offer_price = 0 < gd.precio_descuento < gd.precio
-        unit_price = gd.precio_descuento if has_offer_price else gd.precio
-        if has_offer_price:
-            any_item_on_week_offer = True
-        calculated_subtotal += unit_price
+        precio_contado = gd.precio_descuento if has_offer_price else gd.precio
+
+        if modo_pago == 'cuotas':
+            if not gd.cuotas_activas or gd.licencia_id not in (1, 2) or gd.stock <= 0:
+                return None, None, None, JsonResponse(
+                    {"error": f"El producto {combo_id} no admite pago por cuotas"}, status=400
+                ), None, None
+            pago_hoy = gd.cuota_inicial if gd.cuota_inicial else gd.valor_cuota
+        elif modo_pago == 'reserva':
+            fecha_lanzamiento = gd.producto.fecha_lanzamiento if gd.producto else None
+            if not gd.reserva_activa or not fecha_lanzamiento or fecha_lanzamiento <= today:
+                return None, None, None, JsonResponse(
+                    {"error": f"El producto {combo_id} no admite reserva"}, status=400
+                ), None, None
+            pago_hoy = gd.monto_reserva
+        else:
+            modo_pago = 'contado'
+            pago_hoy = precio_contado
+            if has_offer_price:
+                any_item_on_week_offer = True
+
+        calculated_subtotal += pago_hoy
         cart_items.append({
             'id_combination': combo_id,
             'quantity': 1,
             'category_id': gd.producto_id,
+            'modo_pago': modo_pago,
+            'pago_hoy': pago_hoy,
         })
 
+    pago_hoy_por_combo = {i['id_combination']: i['pago_hoy'] for i in cart_items}
     calculated_amount = calculated_subtotal
     coupon_discount = 0
 
@@ -1473,15 +1576,17 @@ def _calculate_cart_amount(parsed_transaction):
         user = User.objects.filter(pk=user_id).first()
         coupon = Coupon.objects.filter(name_coupon__iexact=coupon_code).first()
         if not user or not coupon:
-            return None, None, None, JsonResponse({"error": "Cupón inválido"}, status=400), None
+            return None, None, None, JsonResponse({"error": "Cupón inválido"}, status=400), None, None
 
         is_valid, reason = coupon.validate_coupon(user, calculated_subtotal, cart_items)
         if not is_valid:
-            return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400), None
+            return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400), None, None
 
         def _unit_price(combo_id):
-            gd = game_details[combo_id]
-            return gd.precio_descuento if 0 < gd.precio_descuento < gd.precio else gd.precio
+            # El cupón se evalúa sobre el pago de hoy de cada ítem (inicial
+            # de cuotas / monto de reserva / precio de contado), no sobre el
+            # total del plan -- ver docs/cuotas-y-reserva.md §4.3.
+            return pago_hoy_por_combo[combo_id]
 
         eligible_ids = set(coupon.game_details.values_list('id_game_detail', flat=True))
         eligible_items = [
@@ -1554,7 +1659,7 @@ def _calculate_cart_amount(parsed_transaction):
         balance_applied = 0
 
     if balance_applied < 0:
-        return None, None, None, JsonResponse({"error": "balanceApplied inválido"}, status=400), None
+        return None, None, None, JsonResponse({"error": "balanceApplied inválido"}, status=400), None, None
 
     # Descuento VIP de miembro de YouTube: excluyente con cupón, saldo y
     # oferta de semana (el margen real por variante es delgado en los
@@ -1579,10 +1684,32 @@ def _calculate_cart_amount(parsed_transaction):
             row = cursor.fetchone()
         current_balance = row[0] if row else 0
         if balance_applied > current_balance:
-            return None, None, None, JsonResponse({"error": "Saldo insuficiente"}, status=400), None
+            return None, None, None, JsonResponse({"error": "Saldo insuficiente"}, status=400), None, None
         calculated_amount = max(calculated_amount - balance_applied, 0)
 
-    return user_id, calculated_amount, cart_items, None, membership_discount
+    # Reparto del descuento total (cupón + saldo + VIP) entre los ítems,
+    # proporcional a su pago de hoy, redondeando y cargando el residuo al
+    # último ítem -- ver docs/cuotas-y-reserva.md §3.2.
+    total_discount = max(calculated_subtotal - calculated_amount, 0)
+    items_calculados = []
+    if cart_items:
+        acumulado = 0
+        for idx, i in enumerate(cart_items):
+            if idx == len(cart_items) - 1:
+                descuento_item = total_discount - acumulado
+            elif calculated_subtotal > 0:
+                descuento_item = round(total_discount * i['pago_hoy'] / calculated_subtotal)
+            else:
+                descuento_item = 0
+            acumulado += descuento_item
+            items_calculados.append({
+                'id_combination': i['id_combination'],
+                'modo_pago': i['modo_pago'],
+                'pago_hoy': i['pago_hoy'],
+                'descuento': descuento_item,
+            })
+
+    return user_id, calculated_amount, cart_items, None, membership_discount, items_calculados
 
 
 # Tarifa de servicio para tarjeta/PSE vía Bold: replica exacta de
@@ -1624,7 +1751,8 @@ def generate_hash_bold(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction inválido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
+    user_id, calculated_amount, cart_items, error_response, membership_discount, items_calculados = \
+        _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
 
@@ -1648,7 +1776,7 @@ def generate_hash_bold(request):
     order_id = generate_order_id()
     signature = generate_signature(order_id, final_amount, currency, settings.SECRET_KEY_BOLD)
 
-    transaction = create_transaction_record(order_id, final_amount, request_transaction)
+    transaction = create_transaction_record(order_id, final_amount, request_transaction, items_calculados)
     _log_membership_discount(transaction, user_id, membership_discount)
 
     payload = build_payload(order_id, signature)
@@ -1682,8 +1810,14 @@ def generate_signature(order_id, amount, currency, secret_key):
     m.update(linked_string.encode())
     return m.hexdigest()
 
-def create_transaction_record(order_id, amount, request_transaction):
-    user_id = json.loads(request_transaction)["id_user"]
+def create_transaction_record(order_id, amount, request_transaction, items_calculados=None):
+    parsed = json.loads(request_transaction)
+    user_id = parsed["id_user"]
+    if items_calculados is not None:
+        # items_calculados viaja dentro del mismo JSON que confirm_sale ya
+        # sabe leer -- ver docs/cuotas-y-reserva.md §4.3.
+        parsed["items_calculados"] = items_calculados
+        request_transaction = json.dumps(parsed)
     return Transactions.objects.create(
         status="pendiente",
         amount=amount,
@@ -1776,7 +1910,10 @@ def sistecredito_create(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction inválido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
+    # allow_plans=False: Sistecrédito queda deshabilitado si hay algún ítem
+    # que no sea contado (ver docs/cuotas-y-reserva.md §4.3).
+    user_id, calculated_amount, cart_items, error_response, membership_discount, items_calculados = \
+        _calculate_cart_amount(parsed_transaction, allow_plans=False)
     if error_response:
         return error_response
 
@@ -1802,6 +1939,7 @@ def sistecredito_create(request):
         ],
         'couponCode': parsed_transaction.get('couponCode'),
         'balanceApplied': parsed_transaction.get('balanceApplied'),
+        'items_calculados': items_calculados,
     })
 
     # Sistecrédito solo acepta alfanuméricos y guiones en invoice. Un "_" (o
@@ -2050,7 +2188,7 @@ def process_sistecredito_event(verified_data):
     if transaction_status == "Approved":
         transaction.status = "approved"
         transaction.save()
-        confirm_sale(transaction.request)
+        confirm_sale(transaction.request, transaction=transaction)
     elif transaction_status in SISTECREDITO_TERMINAL_STATUSES:
         transaction.status = "failed"
         transaction.save()
@@ -2122,7 +2260,8 @@ def transferencia_create(request):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "request_transaction invalido"}, status=400)
 
-    user_id, calculated_amount, cart_items, error_response, membership_discount = _calculate_cart_amount(parsed_transaction)
+    user_id, calculated_amount, cart_items, error_response, membership_discount, items_calculados = \
+        _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
 
@@ -2130,7 +2269,10 @@ def transferencia_create(request):
     # nombre_pagador viaja dentro del mismo JSON que confirm_sale() ya sabe
     # leer (solo usa id_user/data/couponCode/balanceApplied, el resto lo
     # ignora) -- asi no hace falta ninguna columna ni migracion nueva.
-    stored_request = json.dumps({**parsed_transaction, "nombre_pagador": nombre_pagador})
+    # items_calculados igual (ver docs/cuotas-y-reserva.md §4.3).
+    stored_request = json.dumps({
+        **parsed_transaction, "nombre_pagador": nombre_pagador, "items_calculados": items_calculados,
+    })
 
     transaction = Transactions.objects.create(
         status="pendiente",
@@ -2168,13 +2310,11 @@ def transferencia_create(request):
 def transferencia_confirmar_envio(request):
     """El cliente dio clic en 'Ya transferi'. Requiere el mismo Bearer JWT
     que salesByUser -- solo el dueno del pedido (o un superusuario) puede
-    correr su propio plazo."""
+    correr su propio plazo. Si la transacción es el pago de una cuota
+    (ver docs/cuotas-y-reserva.md §4.4), un `planToken` que coincida con el
+    del plan autoriza igual, sin JWT -- para el enlace de invitado."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    token_user_id, is_superuser = _get_verified_jwt_user(request)
-    if token_user_id is None:
-        return JsonResponse({"error": "No autenticado"}, status=401)
 
     data = parse_request_data(request)
     transaction_id = data.get("transactionId") if data else None
@@ -2184,8 +2324,13 @@ def transferencia_confirmar_envio(request):
     transaction = Transactions.objects.filter(ref_payco=transaction_id, payment_id=TRANSFERENCIA_PAYMENT_ID).first()
     if not transaction:
         return JsonResponse({"error": "Transaction not found"}, status=404)
-    if not is_superuser and transaction.user_id_id != token_user_id:
-        return JsonResponse({"error": "No autorizado"}, status=403)
+
+    if not planes.autoriza_por_plan_token(transaction, data.get("planToken")):
+        token_user_id, is_superuser = _get_verified_jwt_user(request)
+        if token_user_id is None:
+            return JsonResponse({"error": "No autenticado"}, status=401)
+        if not is_superuser and transaction.user_id_id != token_user_id:
+            return JsonResponse({"error": "No autorizado"}, status=403)
 
     result = _pagos_nequi_call("POST", f"/api/expectations/{transaction_id}/confirm-transfer", {})
     if result is None:
@@ -2196,13 +2341,10 @@ def transferencia_confirmar_envio(request):
 
 @csrf_exempt
 def transferencia_status(request):
-    """Polling desde el frontend mientras muestra el modal 'Verificando'."""
+    """Polling desde el frontend mientras muestra el modal 'Verificando'.
+    Mismo `planToken` opcional que transferencia_confirmar_envio."""
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    token_user_id, is_superuser = _get_verified_jwt_user(request)
-    if token_user_id is None:
-        return JsonResponse({"error": "No autenticado"}, status=401)
 
     transaction_id = request.GET.get("transactionId")
     if not transaction_id:
@@ -2211,8 +2353,13 @@ def transferencia_status(request):
     transaction = Transactions.objects.filter(ref_payco=transaction_id, payment_id=TRANSFERENCIA_PAYMENT_ID).first()
     if not transaction:
         return JsonResponse({"error": "Transaction not found"}, status=404)
-    if not is_superuser and transaction.user_id_id != token_user_id:
-        return JsonResponse({"error": "No autorizado"}, status=403)
+
+    if not planes.autoriza_por_plan_token(transaction, request.GET.get("planToken")):
+        token_user_id, is_superuser = _get_verified_jwt_user(request)
+        if token_user_id is None:
+            return JsonResponse({"error": "No autenticado"}, status=401)
+        if not is_superuser and transaction.user_id_id != token_user_id:
+            return JsonResponse({"error": "No autorizado"}, status=403)
 
     return JsonResponse({"status": transaction.status}, status=200)
 
@@ -2339,8 +2486,20 @@ def process_transferencia_event(data):
                     transaction_id, data.get("payment_id"))
         transaction.status = "approved"
         transaction.save()
-        confirm_sale(transaction.request)
-        _notify_ventas_module(transaction)
+
+        # Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.4): si esta
+        # transacción es el pago de una cuota siguiente, confirmarla como
+        # tal. El aviso a ventas para carritos con planes lo hace
+        # confirm_sale internamente (_notify_ventas_planes); el aviso "de
+        # forma Bold" (_notify_ventas_module) solo aplica si TODO el
+        # carrito era de contado -- si hay mezcla, el evento de planes ya
+        # lleva también los ítems de contado (§4.3).
+        if planes.transaction_es_cuota(transaction):
+            planes.confirm_installment_payment(transaction)
+        else:
+            confirm_sale(transaction.request, transaction=transaction)
+            if not planes.transaction_tiene_planes(transaction):
+                _notify_ventas_module(transaction)
     elif confidence == "vencida":
         # Solo cancela si sigue pendiente -- si ya se aprobo (por ejemplo un
         # match de alta confianza que llego justo antes que el barrido de

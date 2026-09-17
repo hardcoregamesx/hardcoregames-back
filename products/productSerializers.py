@@ -117,15 +117,52 @@ class SerializerDaysForRentail(serializers.ModelSerializer):
 
 
 class SerializerSales(serializers.ModelSerializer):
-    cuenta = serializers.CharField(source='cuenta.cuenta', read_only=True)
-    password = serializers.CharField(source='cuenta.password', read_only=True)
+    # cuenta/password se resuelven a mano (no con `source`) porque, si el
+    # plan de cuotas de esta venta quedó retirado por falta de pago, deben
+    # salir vacíos en vez de la credencial real (ver
+    # docs/cuotas-y-reserva.md §4.5).
+    cuenta = serializers.SerializerMethodField()
+    password = serializers.SerializerMethodField()
     productName = serializers.CharField(source='producto.title', read_only=True)
     productImage = serializers.CharField(source='producto.image', read_only=True)
     license = serializers.CharField(source='combinacion.licencia', read_only=True)
     console = serializers.CharField(source='combinacion.consola.descripcion', read_only=True)
     productType = serializers.CharField(source='producto.type_id.description', read_only=True)
+    plan_id = serializers.SerializerMethodField()
+    plan_retirado = serializers.SerializerMethodField()
 
     class Meta:
         model = SaleDetail
         fields = ('producto', 'cuenta', 'productName', 'productImage', 'password',
-                  'fecha_venta', 'fecha_vencimiento', 'license', 'console', 'productType')
+                  'fecha_venta', 'fecha_vencimiento', 'license', 'console', 'productType',
+                  'plan_id', 'plan_retirado')
+
+    @staticmethod
+    def _plan(obj):
+        # Un SaleDetail solo tiene plan si se compró a cuotas (una reserva
+        # nunca crea SaleDetail). related_name='payment_plan' es un FK, no
+        # OneToOne, pero en la práctica hay a lo sumo un plan por
+        # SaleDetail -- lo construye planes.crear_plan_cuotas 1:1.
+        if not hasattr(obj, '_plan_cache'):
+            obj._plan_cache = obj.payment_plan.first()
+        return obj._plan_cache
+
+    def get_plan_id(self, obj):
+        plan = self._plan(obj)
+        return plan.pk if plan else None
+
+    def get_plan_retirado(self, obj):
+        plan = self._plan(obj)
+        return bool(plan and plan.retirado)
+
+    def get_cuenta(self, obj):
+        plan = self._plan(obj)
+        if plan and plan.retirado:
+            return ''
+        return obj.cuenta.cuenta if obj.cuenta else ''
+
+    def get_password(self, obj):
+        plan = self._plan(obj)
+        if plan and plan.retirado:
+            return ''
+        return obj.cuenta.password if obj.cuenta else ''
