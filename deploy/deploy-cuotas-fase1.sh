@@ -31,7 +31,9 @@ echo "== 4/6 Django"
 bash /root/deploy_hc.sh hc-django promote candidate-cuotas
 echo "== 5/6 frontend-v2"
 bash /root/deploy_hc.sh hc-frontend-v2 promote candidate-cuotas
-echo "== 6/6 ventas (corre migrate al arrancar)"
+echo "== 6/6 ventas (corre migrate al arrancar; respaldo previo de su base)"
+mkdir -p /root/backups
+docker exec hc-ventas-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > /root/backups/ventas-pre-cuotas-$(date +%Y%m%d-%H%M%S).sql
 bash /root/deploy_hc.sh hc-ventas-django promote candidate-cuotas
 
 echo "== Verificacion"
