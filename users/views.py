@@ -2,6 +2,9 @@ import json
 import uuid
 import random
 
+from django.utils.dateparse import parse_datetime
+from django.utils import timezone
+
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -77,6 +80,14 @@ def register(request, self=None):
         phone_number = body.get('phone_number', '')
         avatar = body.get('avatar', '')
         guest_checkout = bool(body.get('guest_checkout', False))
+        # Origen de adquisición (first-touch) mandado por el frontend desde la
+        # cookie hc_first_touch. Ausente en clientes viejos o si el frontend
+        # no lo manda por alguna razon: queda en blanco, no rompe el registro.
+        origen = (body.get('origen') or '')[:100]
+        origen_medio = (body.get('origen_medio') or '')[:100]
+        origen_campana = (body.get('origen_campana') or '')[:200]
+        origen_referrer = (body.get('origen_referrer') or '')[:200]
+        origen_fecha = parse_datetime(body.get('origen_fecha') or '') or (timezone.now() if origen else None)
 
         email = (email or '').strip()
         try:
@@ -145,7 +156,12 @@ def register(request, self=None):
         user_customized = User_Customized(user_id=last_user_id,
                                           phone_number=phone_number,
                                           avatar=avatar,
-                                          is_guest_account=guest_checkout
+                                          is_guest_account=guest_checkout,
+                                          origen=origen,
+                                          origen_medio=origen_medio,
+                                          origen_campana=origen_campana,
+                                          origen_referrer=origen_referrer,
+                                          origen_fecha=origen_fecha,
                                           )
         user_customized.save()
         return HttpResponse(JsonResponse({'message': 'usuario registrado exitosamente', "status": 200,
