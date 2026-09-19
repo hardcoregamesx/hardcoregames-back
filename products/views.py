@@ -2241,6 +2241,44 @@ def _pagos_nequi_call(method, path, json_body, timeout=10):
         return None
 
 
+def _cancel_previous_pending_transferencias(user_id):
+    """Si el mismo cliente ya tenía un checkout de transferencia sin resolver,
+    lo cancela antes de crear el nuevo.
+
+    Dos pedidos 'pendiente' con el mismo nombre de pagador y (normalmente) el
+    mismo monto son indistinguibles para el matching automático de
+    pagos-nequi: try_match_payment nunca aprueba sola un pago si hay más de
+    un candidato con nombre compatible, así que un reintento de checkout
+    dejaba las dos expectativas en baja confianza esperando revisión manual
+    aunque el nombre calzara perfecto (caso real: pedido de Johan Figueroa,
+    18/09/2026).
+
+    Solo se cancela si pagos-nequi confirma que la expectativa seguía
+    'activa' (nadie había transferido nada todavía). Si ya tiene un pago
+    enganchado -- aunque sea de baja confianza -- se deja intacta: cancelarla
+    ahí perdería la pista de una plata que ya entró, y esa la tiene que
+    resolver un humano desde el panel, no un checkout nuevo del cliente.
+    """
+    pendientes = Transactions.objects.filter(
+        user_id=user_id, payment_id=TRANSFERENCIA_PAYMENT_ID, status="pendiente",
+    )
+    for transaction in pendientes:
+        result = _pagos_nequi_call("POST", f"/api/expectations/{transaction.ref_payco}/cancel", {})
+        if result and result.get("cancelled"):
+            transaction.status = "cancelada"
+            transaction.save()
+            logger.info(
+                "transferencia: %s cancelada por reintento de checkout del mismo usuario",
+                transaction.ref_payco,
+            )
+        else:
+            logger.warning(
+                "transferencia: no se pudo cancelar %s al reintentar checkout "
+                "(ya tiene pago enganchado o pagos-nequi no respondió) -- se deja para revisión manual",
+                transaction.ref_payco,
+            )
+
+
 @csrf_exempt
 def transferencia_create(request):
     if request.method != "POST":
@@ -2264,6 +2302,8 @@ def transferencia_create(request):
         _calculate_cart_amount(parsed_transaction)
     if error_response:
         return error_response
+
+    _cancel_previous_pending_transferencias(user_id)
 
     order_id = generate_order_id()
     # nombre_pagador viaja dentro del mismo JSON que confirm_sale() ya sabe
