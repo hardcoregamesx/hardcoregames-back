@@ -68,25 +68,22 @@ class ParametrosRadar(models.Model):
         help_text='Licencia principal. El "precio sugerido" del listado es para ESTA licencia.',
     )
 
-    # Una cuenta no se vende al mismo precio que un codigo. Estas dos quedan
-    # VACIAS a proposito: hasta que se llenen, el radar publica una sola
-    # variante y no inventa precios de cuentas. Un precio inventado en una
-    # tienda viva es peor que una funcion que falta.
+    # Una cuenta no se vende al mismo precio que un codigo, pero primaria y
+    # secundaria comparten precio. Queda VACIO a proposito: hasta que se llene,
+    # el radar publica solo el codigo y no inventa precios de cuentas. En una
+    # tienda viva, que falte una variante es menos grave que un precio inventado.
     licencia_primaria = models.ForeignKey(
         'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='+', help_text='Licencia de cuenta primaria. Dejar vacia para no publicarla.',
-    )
-    factor_primaria = models.DecimalField(
-        max_digits=4, decimal_places=2, null=True, blank=True,
-        help_text='Precio primaria = precio_colombia x este factor. Ej: 0.45',
     )
     licencia_secundaria = models.ForeignKey(
         'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='+', help_text='Licencia de cuenta secundaria. Dejar vacia para no publicarla.',
     )
-    factor_secundaria = models.DecimalField(
+    factor_cuenta = models.DecimalField(
         max_digits=4, decimal_places=2, null=True, blank=True,
-        help_text='Precio secundaria = precio_colombia x este factor. Ej: 0.30',
+        help_text='Precio de cuenta (primaria y secundaria por igual) = precio_colombia x este '
+                  'numero. Ej: 0.45 deja el juego al 45% de lo que cuesta en la tienda.',
     )
     tipo_producto = models.ForeignKey(
         'products.ProductsType', null=True, blank=True, on_delete=models.SET_NULL,
@@ -282,8 +279,8 @@ class JuegoDetectado(models.Model):
         filas = []
         combinaciones = (
             (parametros.licencia_default, parametros.factor_precio_venta),
-            (parametros.licencia_primaria, parametros.factor_primaria),
-            (parametros.licencia_secundaria, parametros.factor_secundaria),
+            (parametros.licencia_primaria, parametros.factor_cuenta),
+            (parametros.licencia_secundaria, parametros.factor_cuenta),
         )
         for licencia, factor in combinaciones:
             if licencia is None or not factor:
@@ -412,8 +409,8 @@ class JuegoDetectado(models.Model):
         base = self.precio_co_vigente
         if base:
             for lic, factor in (
-                (parametros.licencia_primaria, parametros.factor_primaria),
-                (parametros.licencia_secundaria, parametros.factor_secundaria),
+                (parametros.licencia_primaria, parametros.factor_cuenta),
+                (parametros.licencia_secundaria, parametros.factor_cuenta),
             ):
                 if lic is not None and factor and lic.pk != licencia.pk:
                     _variante(lic, int(base * factor))

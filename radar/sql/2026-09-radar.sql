@@ -121,12 +121,19 @@ ALTER TABLE radar_parametrosradar
   -- Cuantas unidades queda disponible cada producto publicado. No es stock
   -- real: es cuantas ventas se aceptan antes de tener que revisarlo a mano.
   ADD COLUMN IF NOT EXISTS stock_publicacion integer NOT NULL DEFAULT 10,
-  -- Una cuenta no se vende al precio de un codigo. Vacias a proposito: hasta
-  -- que se llenen, el radar publica una sola variante y no inventa precios.
+  -- Una cuenta no se vende al precio de un codigo, pero primaria y secundaria
+  -- comparten precio: un solo factor para las dos. Vacio a proposito: hasta
+  -- que se llene, el radar publica solo el codigo y no inventa precios.
   ADD COLUMN IF NOT EXISTS licencia_primaria_id integer NULL,
-  ADD COLUMN IF NOT EXISTS factor_primaria numeric(4,2) NULL,
   ADD COLUMN IF NOT EXISTS licencia_secundaria_id integer NULL,
-  ADD COLUMN IF NOT EXISTS factor_secundaria numeric(4,2) NULL;
+  ADD COLUMN IF NOT EXISTS factor_cuenta numeric(4,2) NULL;
+
+-- Columnas de una version anterior de este mismo archivo, que llego a tener un
+-- factor por cada licencia. Nunca se llenaron: se quitan para no dejar campos
+-- muertos que confundan en el admin.
+ALTER TABLE radar_parametrosradar
+  DROP COLUMN IF EXISTS factor_primaria,
+  DROP COLUMN IF EXISTS factor_secundaria;
 
 -- Bandera en el catalogo: estos productos NO son de entrega inmediata, se
 -- consiguen sobre pedido y se entregan en el horario de la tienda. El frontend
