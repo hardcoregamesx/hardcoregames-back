@@ -8,7 +8,7 @@ que margen y desde que region.
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from radar.models import EjecucionRadar, JuegoDetectado, ParametrosRadar
+from radar.models import EjecucionRadar, Franquicia, JuegoDetectado, ParametrosRadar
 
 
 def pesos(valor):
@@ -30,6 +30,10 @@ class Command(BaseCommand):
         parser.add_argument(
             '--min-resenas', type=int, default=0,
             help='Descarta juegos con menos de N resenas en la tienda. Filtro de demanda.',
+        )
+        parser.add_argument(
+            '--solo-conocidos', action='store_true',
+            help='Solo juegos de franquicia vigilada o con resenas. Filtra el ruido.',
         )
         parser.add_argument(
             '--todos', action='store_true',
@@ -60,10 +64,19 @@ class Command(BaseCommand):
                   .filter(tienda=options['tienda'])
                   .prefetch_related('precios'))
 
+        terminos = Franquicia.terminos_activos() if options['solo_conocidos'] else []
+
         filas = []
         for juego in juegos:
             if juego.rating_conteo < options['min_resenas']:
                 continue
+            if options['solo_conocidos']:
+                titulo = juego.titulo.lower()
+                conocido = (juego.rating_conteo >= 20
+                            or juego.producto_existente_id is not None
+                            or any(t in titulo for t in terminos))
+                if not conocido:
+                    continue
             venta = juego.precio_venta_sugerido(parametros)
             if venta is None:
                 continue

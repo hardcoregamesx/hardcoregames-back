@@ -6,10 +6,12 @@ region mas barata pero no toca la tienda, para poder revisar los precios con
 calma. "Publicar" ya crea el producto real y lo pone a la venta.
 """
 from django.contrib import admin, messages
+from django.db.models import Q
 from django.utils.html import format_html
 
 from radar.models import (
     EjecucionRadar,
+    Franquicia,
     JuegoDetectado,
     ParametrosRadar,
     PrecioRegional,
@@ -37,6 +39,74 @@ class ParametrosRadarAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(Franquicia)
+class FranquiciaAdmin(admin.ModelAdmin):
+    list_display = ['termino', 'activa', 'nota']
+    list_editable = ['activa', 'nota']
+    search_fields = ['termino']
+    list_filter = ['activa']
+
+
+class RelevanciaFilter(admin.SimpleListFilter):
+    """Separa lo que vale la pena mirar del ruido.
+
+    El radar trae cientos de ofertas por ciclo y la mayoria son juegos que
+    nadie pide. Dos senales distintas los separan: las resenas de la propia
+    tienda (lo que se vende alla) y la lista de franquicias vigiladas (lo que
+    se vende aqui, que es criterio del dueno). Ninguna sirve sola.
+    """
+
+    title = 'relevancia'
+    parameter_name = 'relevancia'
+
+    RESENAS_CONOCIDO = 20
+    RESENAS_POPULAR = 100
+
+    def lookups(self, request, model_admin):
+        return [
+            ('vale', 'Vale la pena mirarlo'),
+            ('franquicia', 'De franquicia vigilada'),
+            ('conocidos', 'Con %s+ resenas' % self.RESENAS_CONOCIDO),
+            ('populares', 'Con %s+ resenas' % self.RESENAS_POPULAR),
+            ('catalogo', 'Ya lo vendes'),
+            ('ruido', 'Ruido (sin resenas ni franquicia)'),
+        ]
+
+    @staticmethod
+    def _q_franquicia():
+        terminos = Franquicia.terminos_activos()
+        if not terminos:
+            return Q(pk__in=[])
+        condicion = Q()
+        for termino in terminos:
+            condicion |= Q(titulo__icontains=termino)
+        return condicion
+
+    def queryset(self, request, queryset):
+        valor = self.value()
+        if not valor:
+            return queryset
+        franquicia = self._q_franquicia()
+        if valor == 'franquicia':
+            return queryset.filter(franquicia)
+        if valor == 'conocidos':
+            return queryset.filter(rating_conteo__gte=self.RESENAS_CONOCIDO)
+        if valor == 'populares':
+            return queryset.filter(rating_conteo__gte=self.RESENAS_POPULAR)
+        if valor == 'catalogo':
+            return queryset.exclude(producto_existente_id=None)
+        if valor == 'vale':
+            return queryset.filter(
+                franquicia
+                | Q(rating_conteo__gte=self.RESENAS_CONOCIDO)
+                | ~Q(producto_existente_id=None)
+            )
+        if valor == 'ruido':
+            return queryset.exclude(franquicia).filter(
+                rating_conteo__lt=self.RESENAS_CONOCIDO, producto_existente_id=None)
+        return queryset
 
 
 @admin.register(TasaTienda)
@@ -83,11 +153,12 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
         'col_catalogo',
     ]
     list_editable = ['precio_venta']
-    list_filter = ['estado', 'tienda', 'comprable_co', 'visto_ultimo']
+    list_filter = [RelevanciaFilter, 'estado', 'tienda', 'comprable_co', 'visto_ultimo']
     search_fields = ['titulo', 'id_externo', 'generos']
     readonly_fields = ['visto_primero', 'visto_ultimo', 'publicado_en', 'producto_publicado_id']
     inlines = [PrecioRegionalInline]
     list_per_page = 50
+    ordering = ['-rating_conteo', 'titulo']
     actions = ['accion_aprobar', 'accion_descartar', 'accion_publicar', 'accion_despublicar']
 
     def get_queryset(self, request):

@@ -150,6 +150,41 @@ CREATE INDEX IF NOT EXISTS products_products_sobre_pedido_idx
 -- como gift card con descuento en buysellvouchers, y el descuento NO es el
 -- mismo en Xbox que en PSN. El costo real se compone factor x TasaCambio.USD.
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- Franquicias vigiladas: nombres que valen la pena mirar aunque el numero de
+-- resenas no lo diga. El radar trae cientos de ofertas por ciclo y la mayoria
+-- son juegos que nadie pide; esto es el criterio del dueno, editable a mano.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS radar_franquicia (
+  id serial PRIMARY KEY,
+  termino varchar(80) NOT NULL UNIQUE,
+  activa boolean NOT NULL DEFAULT true,
+  nota varchar(200) NOT NULL DEFAULT ''
+);
+
+-- Semilla con las que nombro el dueno, mas las sagas grandes obvias. Se puede
+-- editar y ampliar desde el admin; este INSERT no pisa lo que ya exista.
+INSERT INTO radar_franquicia (termino) VALUES
+  ('ghost recon'), ('batman'), ('borderlands'), ('call of duty'),
+  ('a plague tale'), ('crash'), ('code vein'), ('spyro'),
+  ('assassin''s creed'), ('far cry'), ('resident evil'), ('mortal kombat'),
+  ('need for speed'), ('fifa'), ('ea sports fc'), ('nba 2k'),
+  ('grand theft auto'), ('red dead'), ('the witcher'), ('cyberpunk'),
+  ('dark souls'), ('elden ring'), ('sekiro'), ('bloodborne'),
+  ('tomb raider'), ('hitman'), ('dying light'), ('dead island'),
+  ('watch dogs'), ('rainbow six'), ('battlefield'), ('doom'),
+  ('wolfenstein'), ('fallout'), ('the elder scrolls'), ('skyrim'),
+  ('mafia'), ('sniper elite'), ('metro'), ('dishonored'),
+  ('star wars'), ('lego'), ('sonic'), ('street fighter'),
+  ('tekken'), ('dragon ball'), ('naruto'), ('one piece'),
+  ('minecraft'), ('forza'), ('gears'), ('halo'),
+  ('it takes two'), ('overcooked'), ('worms'), ('rayman'),
+  ('monster hunter'), ('final fantasy'), ('kingdom hearts'), ('persona'),
+  ('yakuza'), ('like a dragon'), ('nier'), ('devil may cry'),
+  ('god of war'), ('horizon'), ('the last of us'), ('uncharted'),
+  ('spider-man'), ('ratchet'), ('gran turismo'), ('days gone')
+ON CONFLICT (termino) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS radar_tasatienda (
   tienda varchar(8) PRIMARY KEY,           -- 'XBOX' | 'PS'
   factor numeric(8,6) NOT NULL,            -- dolares que cuesta 1 dolar de saldo

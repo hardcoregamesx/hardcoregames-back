@@ -113,6 +113,40 @@ class ParametrosRadar(models.Model):
         return obj
 
 
+class Franquicia(models.Model):
+    """Nombres que valen la pena mirar, aunque el numero no lo diga.
+
+    El radar trae cientos de ofertas por ciclo y la mayoria son juegos que
+    nadie pide. Las resenas de la tienda filtran bastante, pero no todo: un
+    juego de una saga conocida puede tener pocas resenas en Xbox y aun asi
+    venderse aqui. Esa lista es criterio del dueno, no un dato que se pueda
+    deducir, y por eso se edita a mano.
+
+    El termino se busca dentro del titulo, sin distinguir mayusculas: "batman"
+    encuentra "Batman: Arkham Knight" y "BATMAN - Edicion Definitiva".
+    """
+
+    termino = models.CharField(
+        max_length=80, unique=True,
+        help_text='Trozo del titulo a buscar. Ej: "call of duty", "batman", "borderlands".',
+    )
+    activa = models.BooleanField(default=True)
+    nota = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        managed = False
+        verbose_name = 'una franquicia vigilada'
+        verbose_name_plural = 'Franquicias vigiladas'
+        ordering = ['termino']
+
+    def __str__(self):
+        return self.termino
+
+    @classmethod
+    def terminos_activos(cls):
+        return list(cls.objects.filter(activa=True).values_list('termino', flat=True))
+
+
 class TasaCambio(models.Model):
     """Cuantos pesos colombianos vale una unidad de cada moneda.
 
