@@ -50,28 +50,46 @@ echo "== 5/7 Promoviendo la imagen a produccion"
 bash /root/deploy_hc.sh hc-django promote "$TAG"
 docker ps --filter name=hc-django --format "   {{.Names}} {{.Status}}"
 
-# Comprobar que el admin siga en pie. Si la herramienta de chequeo no esta
-# disponible se avisa y se sigue: no tiene sentido revertir un despliegue sano
-# solo porque falta `curl` en el host.
-if command -v curl >/dev/null 2>&1; then
-  echo "   comprobando que el admin siga respondiendo..."
-  OK=0
-  for i in $(seq 1 20); do
-    CODIGO=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-      https://admin.hardcoregames.co/admin/login/ || echo 000)
-    case "$CODIGO" in
-      200|301|302) OK=1; echo "   admin responde ($CODIGO)"; break ;;
-    esac
-    sleep 3
-  done
-  if [ "$OK" -ne 1 ]; then
-    echo "ERROR: el admin no responde tras un minuto (ultimo codigo: $CODIGO). Revirtiendo."
+# Comprobacion de salud DESDE DENTRO del contenedor.
+#
+# Antes esto le pedia al host que abriera https://admin.hardcoregames.co. Mala
+# idea: si el servidor no puede alcanzar su propio dominio publico -- cosa
+# comun -- la comprobacion falla, el script cree que rompio el sitio y revierte
+# un despliegue que estaba perfecto. El sintoma es desconcertante: el
+# despliegue "corre bien" y sigue corriendo la imagen vieja.
+#
+# Ahora se comprueba lo que de verdad importa y no depende de la red externa:
+# que el contenedor este arriba, que tenga el codigo nuevo y que su servidor
+# responda en localhost.
+echo "   comprobando el contenedor..."
+SANO=1
+
+if ! docker ps --filter name=hc-django --filter status=running --format '{{.Names}}' | grep -q hc-django; then
+  echo "ERROR: el contenedor hc-django no quedo corriendo. Revirtiendo."
+  bash /root/deploy_hc.sh hc-django rollback
+  exit 1
+fi
+
+if docker exec hc-django test -f radar/tiendas/vouchers.py; then
+  echo "   el codigo nuevo esta dentro de la imagen"
+else
+  echo "   AVISO: la imagen no trae radar/tiendas/vouchers.py. Revisa que el build"
+  echo "          haya usado el checkout actualizado."
+  SANO=0
+fi
+
+RESPUESTA=$(docker exec hc-django python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/admin/login/', timeout=15).status)" 2>/dev/null || echo 000)
+case "$RESPUESTA" in
+  200|301|302) echo "   el servidor responde dentro del contenedor ($RESPUESTA)" ;;
+  *)
+    echo "ERROR: el servidor no responde dentro del contenedor (codigo: $RESPUESTA). Revirtiendo."
     bash /root/deploy_hc.sh hc-django rollback
     exit 1
-  fi
-else
-  echo "   AVISO: no hay curl en el host, no se pudo comprobar el admin."
-  echo "          Abre https://admin.hardcoregames.co/admin/ y confirma que carga."
+    ;;
+esac
+
+if [ "$SANO" -ne 1 ]; then
+  echo "   El despliegue sigue en pie, pero revisa el aviso de arriba."
 fi
 
 echo "== 6/7 Sembrando tasas de cambio y primera corrida del radar"
