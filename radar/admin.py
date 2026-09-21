@@ -149,10 +149,10 @@ class PrecioRegionalInline(admin.TabularInline):
 class JuegoDetectadoAdmin(admin.ModelAdmin):
     list_display = [
         'titulo', 'tienda', 'col_estado', 'col_precio_co', 'col_mejor', 'col_costo',
-        'col_venta', 'precio_venta', 'col_margen', 'col_vence', 'col_popularidad',
+        'col_venta', 'precio_venta', 'precio_cuenta', 'col_margen', 'col_vence', 'col_popularidad',
         'col_catalogo',
     ]
-    list_editable = ['precio_venta']
+    list_editable = ['precio_venta', 'precio_cuenta']
     list_filter = [RelevanciaFilter, 'estado', 'tienda', 'comprable_co', 'visto_ultimo']
     search_fields = ['titulo', 'id_externo', 'generos']
     readonly_fields = ['visto_primero', 'visto_ultimo', 'publicado_en', 'producto_publicado_id']
@@ -182,11 +182,16 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
             if mejor is None:
                 sin_region += 1
                 continue
+            # Se prellenan los dos; borrar uno es como se dice "esta
+            # modalidad no la ofrezco para este juego".
             if not juego.precio_venta:
                 juego.precio_venta = juego.precio_venta_sugerido(parametros)
+            if not juego.precio_cuenta:
+                juego.precio_cuenta = juego.precio_cuenta_sugerido(parametros)
             juego.region_compra = mejor.region
             juego.estado = 'aprobado'
-            juego.save(update_fields=['precio_venta', 'region_compra', 'estado'])
+            juego.save(update_fields=[
+                'precio_venta', 'precio_cuenta', 'region_compra', 'estado'])
             listos += 1
         if listos:
             self.message_user(

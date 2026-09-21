@@ -253,9 +253,18 @@ class JuegoDetectado(models.Model):
 
     # --- Aprobacion y publicacion ---
     estado = models.CharField(max_length=12, choices=ESTADOS, default='nuevo')
+    # Dos precios por juego, no uno. Un mismo titulo se puede ofrecer como
+    # codigo, como cuenta, o como las dos cosas: dejar un precio vacio es la
+    # forma de decir "esta no la ofrezco". El radar sugiere ambos al aprobar,
+    # pero la ultima palabra es del dueno.
     precio_venta = models.BigIntegerField(
-        null=True, blank=True,
-        help_text='Precio final en pesos. Lo fija el dueno; el radar solo sugiere.',
+        null=True, blank=True, verbose_name='Precio codigo',
+        help_text='Precio en pesos como codigo. Vacio = no se ofrece como codigo.',
+    )
+    precio_cuenta = models.BigIntegerField(
+        null=True, blank=True, verbose_name='Precio cuenta',
+        help_text='Precio en pesos como cuenta (primaria y secundaria por igual). '
+                  'Vacio = no se ofrece como cuenta.',
     )
     region_compra = models.CharField(
         max_length=2, blank=True, default='',
@@ -297,6 +306,13 @@ class JuegoDetectado(models.Model):
             return None
         parametros = parametros or ParametrosRadar.actuales()
         return int(base * parametros.factor_precio_venta)
+
+    def precio_cuenta_sugerido(self, parametros=None):
+        base = self.precio_co_vigente
+        parametros = parametros or ParametrosRadar.actuales()
+        if not base or not parametros.factor_cuenta:
+            return None
+        return int(base * parametros.factor_cuenta)
 
     def sugeridos_por_licencia(self, parametros=None):
         """Precio sugerido para cada licencia configurada.
@@ -364,8 +380,10 @@ class JuegoDetectado(models.Model):
 
         parametros = parametros or ParametrosRadar.actuales()
 
-        if not self.precio_venta:
-            raise ValueError('"%s" no tiene precio de venta. Ponle uno antes de publicar.' % self.titulo)
+        if not self.precio_venta and not self.precio_cuenta:
+            raise ValueError(
+                '"%s" no tiene ningun precio. Ponle el de codigo, el de cuenta o los dos.'
+                % self.titulo)
 
         consola = self.consola or (
             parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
@@ -434,20 +452,14 @@ class JuegoDetectado(models.Model):
             v.save()
             return v
 
-        _variante(licencia, self.precio_venta)
+        # Cada precio vacio es una decision: "esta modalidad no la ofrezco".
+        if self.precio_venta:
+            _variante(licencia, self.precio_venta)
 
-        # Cuentas: solo si estan configuradas. Un codigo y una cuenta no valen
-        # lo mismo, asi que cada una lleva su propio factor sobre el precio de
-        # Colombia. Sin configurar, no se publica ninguna: mejor que falte una
-        # variante a que salga a un precio inventado.
-        base = self.precio_co_vigente
-        if base:
-            for lic, factor in (
-                (parametros.licencia_primaria, parametros.factor_cuenta),
-                (parametros.licencia_secundaria, parametros.factor_cuenta),
-            ):
-                if lic is not None and factor and lic.pk != licencia.pk:
-                    _variante(lic, int(base * factor))
+        if self.precio_cuenta:
+            for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
+                if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
+                    _variante(lic, self.precio_cuenta)
 
         self.producto_publicado_id = producto.id_product
         self.publicado_en = timezone.now()

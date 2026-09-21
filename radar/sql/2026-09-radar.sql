@@ -101,6 +101,9 @@ ALTER TABLE radar_juegodetectado
   ADD COLUMN IF NOT EXISTS estado varchar(12) NOT NULL DEFAULT 'nuevo',
   -- Precio que fija el dueno a mano. El radar solo sugiere.
   ADD COLUMN IF NOT EXISTS precio_venta bigint NULL,
+  -- Dos precios por juego: un titulo se puede ofrecer como codigo, como
+  -- cuenta, o como las dos cosas. Vacio = esa modalidad no se ofrece.
+  ADD COLUMN IF NOT EXISTS precio_cuenta bigint NULL,
   -- Region elegida para comprarlo (se congela al aprobar).
   ADD COLUMN IF NOT EXISTS region_compra varchar(2) NOT NULL DEFAULT '',
   -- Producto creado en el catalogo al publicar.
