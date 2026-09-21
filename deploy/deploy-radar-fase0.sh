@@ -75,9 +75,17 @@ else
 fi
 
 echo "== 6/7 Sembrando tasas de cambio y primera corrida del radar"
-docker exec hc-django python manage.py radar_tasas
-docker exec hc-django python manage.py radar_xbox
-docker exec hc-django python manage.py radar_reporte --top 15 --min-resenas 20
+# A esta altura la imagen ya esta promovida y el despliegue es un exito. Que la
+# primera corrida del radar tropiece con un corte de red no es motivo para
+# abortar: el cron la repite manana, y se puede relanzar a mano. Por eso estos
+# pasos no llevan `set -e`.
+docker exec hc-django python manage.py radar_tasas || echo "   AVISO: fallaron las tasas; relanza: docker exec hc-django python manage.py radar_tasas"
+if docker exec hc-django python manage.py radar_xbox; then
+  docker exec hc-django python manage.py radar_reporte --top 15 --min-resenas 20 || true
+else
+  echo "   AVISO: la primera corrida del radar no termino. El despliegue SI quedo bien."
+  echo "          Relanzala con: docker exec hc-django python manage.py radar_xbox"
+fi
 
 echo "== 7/7 Instalando el cron diario (idempotente)"
 LOG=/opt/hardcoregames/radar.log

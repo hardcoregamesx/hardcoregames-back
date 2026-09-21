@@ -82,6 +82,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR('Regiones desconocidas: %s' % ', '.join(desconocidas)))
             raise SystemExit(2)
 
+        self.fallidas = []
         ejecucion = None
         if not dry_run:
             ejecucion = EjecucionRadar.objects.create(tienda='XBOX', regiones=','.join(regiones))
@@ -102,9 +103,11 @@ class Command(BaseCommand):
 
         if ejecucion:
             ejecucion.fin = timezone.now()
-            ejecucion.ok = juegos > 0
+            ejecucion.ok = juegos > 0 and not self.fallidas
             ejecucion.juegos_vistos = juegos
             ejecucion.precios_guardados = precios_guardados
+            if self.fallidas:
+                ejecucion.error = 'Regiones que fallaron: %s' % ' | '.join(self.fallidas)
             ejecucion.save()
 
         if juegos == 0:
@@ -116,6 +119,11 @@ class Command(BaseCommand):
             ))
             raise SystemExit(1)
 
+        if self.fallidas:
+            self.stderr.write(self.style.WARNING(
+                'Corrida PARCIAL: fallaron %s de las regiones pedidas (%s). Los datos de las '
+                'demas si se guardaron.' % (len(self.fallidas), ' | '.join(self.fallidas))))
+
         self.stdout.write(self.style.SUCCESS(
             'Radar Xbox listo: %s juegos, %s precios regionales.' % (juegos, precios_guardados)
         ))
@@ -125,14 +133,32 @@ class Command(BaseCommand):
         log = lambda m: self.stdout.write(m)
 
         # 1. Ofertas de cada region de compra.
+        #
+        # Una region que falla no debe tumbar la corrida entera: las otras tres
+        # traen datos perfectamente utiles, y perderlos por un corte de red de
+        # tres segundos en la cuarta seria absurdo. Lo que si queda es el rastro
+        # de cual fallo, para que no pase inadvertido.
         por_region = {}
+        self.fallidas = []
         for region in regiones:
             self.stdout.write('Revisando ofertas en %s...' % region)
-            encontradas = xbox.ofertas(
-                region, max_paginas=max_paginas, descuento_minimo=minimo, sesion=sesion, log=log,
-            )
+            try:
+                encontradas = xbox.ofertas(
+                    region, max_paginas=max_paginas, descuento_minimo=minimo, sesion=sesion, log=log,
+                )
+            except xbox.ErrorTienda as exc:
+                self.fallidas.append('%s: %s' % (region, exc))
+                self.stderr.write(self.style.WARNING('  %s FALLO: %s' % (region, exc)))
+                continue
             por_region[region] = encontradas
             self.stdout.write('  %s: %s ofertas' % (region, len(encontradas)))
+
+        if not por_region:
+            raise xbox.ErrorTienda(
+                'Fallaron todas las regiones. No es un corte de red: revisa si el endpoint '
+                'de Xbox cambio (ver docs/radar-ofertas.md). Detalle: %s' % ' | '.join(self.fallidas))
+
+        regiones = [r for r in regiones if r in por_region]
 
         # 2. Un mismo juego puede estar en oferta en varias regiones.
         fichas = {}

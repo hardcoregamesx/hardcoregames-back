@@ -19,6 +19,7 @@ razon por la que Xbox es la tienda mas facil de comparar entre regiones.
 """
 import base64
 import json
+import time
 from datetime import datetime
 
 import requests
@@ -44,6 +45,9 @@ DESCUENTO_PISO = 10.0
 
 # displaycatalog acepta lotes; 20 es conservador y estable.
 LOTE_DISPLAYCATALOG = 20
+
+# Microsoft tarda a veces mas de 30s en las paginas profundas de un mercado.
+TIMEOUT = 60
 
 _FILTRO_OFERTAS = {
     'orderby': {'id': 'orderby', 'choices': [{'id': 'DiscountPercentage desc'}]},
@@ -88,6 +92,29 @@ def _sesion():
     return s
 
 
+# Un corte de red pasajero no es lo mismo que un endpoint que cambio: el
+# primero se reintenta, el segundo hay que repararlo. Sin esta distincion una
+# corrida entera se cae por un timeout de tres segundos.
+INTENTOS = 3
+ESPERA_BASE = 3  # segundos; se duplica en cada reintento
+
+
+def _con_reintentos(descripcion, hacer, log=None):
+    ultimo = None
+    for intento in range(1, INTENTOS + 1):
+        try:
+            return hacer()
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            ultimo = exc
+            if intento < INTENTOS:
+                espera = ESPERA_BASE * (2 ** (intento - 1))
+                if log:
+                    log('  %s: fallo de red (intento %s de %s), reintento en %ss'
+                        % (descripcion, intento, INTENTOS, espera))
+                time.sleep(espera)
+    raise ErrorTienda('%s: la red fallo %s veces seguidas (%s)' % (descripcion, INTENTOS, ultimo))
+
+
 def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None, log=None):
     """Devuelve la lista de ofertas vigentes de una region.
 
@@ -113,16 +140,20 @@ def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None
             'ChannelId': None,
         }
         try:
-            r = sesion.post(
-                EMERALD_URL,
-                params={'locale': locale},
-                headers={
-                    'content-type': 'application/json',
-                    'X-MS-API-Version': '1.1',
-                    'ms-cv': 'hcradar',
-                },
-                data=json.dumps(cuerpo),
-                timeout=30,
+            r = _con_reintentos(
+                'Xbox %s pagina %s' % (region, pagina + 1),
+                lambda: sesion.post(
+                    EMERALD_URL,
+                    params={'locale': locale},
+                    headers={
+                        'content-type': 'application/json',
+                        'X-MS-API-Version': '1.1',
+                        'ms-cv': 'hcradar',
+                    },
+                    data=json.dumps(cuerpo),
+                    timeout=TIMEOUT,
+                ),
+                log=log,
             )
         except requests.RequestException as exc:
             raise ErrorTienda('Xbox %s: fallo de red en la pagina %s: %s' % (region, pagina + 1, exc))
@@ -214,15 +245,19 @@ def precios(big_ids, region, sesion=None, log=None):
     for inicio in range(0, len(ids), LOTE_DISPLAYCATALOG):
         lote = ids[inicio:inicio + LOTE_DISPLAYCATALOG]
         try:
-            r = sesion.get(
-                DISPLAYCATALOG_URL,
-                params={
-                    'bigIds': ','.join(lote),
-                    'market': region,
-                    'languages': idioma,
-                    'MS-CV': 'hcradar',
-                },
-                timeout=30,
+            r = _con_reintentos(
+                'Xbox %s precios' % region,
+                lambda: sesion.get(
+                    DISPLAYCATALOG_URL,
+                    params={
+                        'bigIds': ','.join(lote),
+                        'market': region,
+                        'languages': idioma,
+                        'MS-CV': 'hcradar',
+                    },
+                    timeout=TIMEOUT,
+                ),
+                log=log,
             )
         except requests.RequestException as exc:
             raise ErrorTienda('Xbox %s: fallo de red consultando precios: %s' % (region, exc))
