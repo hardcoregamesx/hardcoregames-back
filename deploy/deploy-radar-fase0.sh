@@ -145,25 +145,44 @@ if [ "$ANTES" -lt 5 ]; then
 fi
 echo "   crontab respaldado en $RESPALDO ($ANTES lineas)"
 
-if grep -q 'radar_xbox' "$RESPALDO"; then
-  echo "   el cron del radar ya existia, no se toca"
-else
-  {
-    cat "$RESPALDO"
-    echo "# Radar de ofertas (docs/radar-ofertas.md). Las tasas van antes que el radar."
-    echo "0 6 * * *  docker exec hc-django python manage.py radar_tasas >> $LOG 2>&1"
-    echo "15 6 * * * docker exec hc-django python manage.py radar_xbox  >> $LOG 2>&1"
-  } | crontab -
+# Cada linea se comprueba por separado. Antes bastaba con que existiera
+# `radar_xbox` para dar el cron por instalado, asi que las tareas que se
+# agregaron despues nunca llegaron a programarse -- y `radar_vencer` es la que
+# baja de la tienda las promociones que ya terminaron. Sin ella, un juego
+# desaparece de la landing pero sigue comprable por enlace directo, al precio
+# de una promocion que ya no existe: cada una de esas ventas es a perdida.
+NUEVAS=$(mktemp)
+cp "$RESPALDO" "$NUEVAS"
+agregar() {
+  if ! grep -q "$1" "$NUEVAS"; then
+    echo "$2" >> "$NUEVAS"
+    echo "   + $1"
+  fi
+}
+grep -q 'Radar de ofertas' "$NUEVAS" || \
+  echo "# Radar de ofertas (docs/radar-ofertas.md). Las tasas van antes que el radar." >> "$NUEVAS"
 
+agregar 'radar_tasas'  "0 6 * * *    docker exec hc-django python manage.py radar_tasas   >> $LOG 2>&1"
+agregar 'radar_xbox'   "15 6 * * *   docker exec hc-django python manage.py radar_xbox    >> $LOG 2>&1"
+# Cada media hora: una promocion puede vencer a cualquier hora del dia.
+agregar 'radar_vencer' "*/30 * * * * docker exec hc-django python manage.py radar_vencer  >> $LOG 2>&1"
+# Una vez al dia basta para borrar lo que vencio sin venderse.
+agregar 'radar_limpiar' "30 5 * * *  docker exec hc-django python manage.py radar_limpiar >> $LOG 2>&1"
+
+if cmp -s "$RESPALDO" "$NUEVAS"; then
+  echo "   el cron ya estaba completo"
+else
+  crontab "$NUEVAS"
   DESPUES=$(crontab -l | grep -cve '^[[:space:]]*$' || true)
   if [ "$DESPUES" -lt "$ANTES" ]; then
     echo "ERROR: el crontab quedo con menos lineas que antes ($DESPUES < $ANTES). Restaurando."
     crontab "$RESPALDO"
     exit 1
   fi
-  echo "   cron instalado ($ANTES -> $DESPUES lineas)"
+  echo "   cron actualizado ($ANTES -> $DESPUES lineas)"
 fi
-crontab -l | grep -A2 'Radar de ofertas' || true
+rm -f "$NUEVAS"
+crontab -l | grep 'radar_' || true
 
 echo
 echo "Listo. La fase 0 esta corriendo."
