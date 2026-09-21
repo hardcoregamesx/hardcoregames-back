@@ -6,15 +6,18 @@
    Las acciones del admin de Django exigen una seleccion; poner el precio ya es
    la decision de vender, asi que obligar a recorrer la lista otra vez marcando
    era trabajo repetido. Este boton llama a una vista propia y no necesita
-   seleccion. #}
+   seleccion.
+
+   Ojo con las clases: este admin usa Jazzmin (Bootstrap), no el admin plano de
+   Django. `addlink` aqui no esta estilizado y sale como texto verde sobre verde
+   con vineta; hay que usar `btn btn-success` y quitar el bullet del <li>. #}
 {% block object-tools-items %}
-  <li>
+  {{ block.super }}
+  <li style="list-style:none; display:inline-block;">
     <a href="{% url 'admin:radar_publicar_todos' %}"
-       class="addlink"
-       style="background:#27ae60;border-color:#27ae60"
-       onclick="return confirm('Se publicaran TODOS los juegos que tengan precio de codigo o de cuenta. Los descartados y los vencidos no se tocan. Continuar?')">
-      Publicar todos los que tengan precio
+       class="btn btn-success"
+       onclick="return confirm('Se publicarán TODOS los juegos que tengan precio de código o de cuenta.\n\nLos descartados y los vencidos no se tocan.\n\n¿Continuar?')">
+      <i class="fas fa-rocket"></i>&nbsp; Publicar todos los que tengan precio
     </a>
   </li>
-  {{ block.super }}
 {% endblock %}
