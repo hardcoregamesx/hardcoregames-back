@@ -7,6 +7,8 @@ calma. "Publicar" ya crea el producto real y lo pone a la venta.
 """
 from django.contrib import admin, messages
 from django.db.models import Q
+from django.shortcuts import redirect
+from django.urls import path, reverse
 from django.utils.html import format_html
 
 from radar.models import (
@@ -206,16 +208,29 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
         for mensaje in fallos[:5]:
             self.message_user(request, mensaje, messages.ERROR)
 
-    @admin.action(description='PUBLICAR TODOS los que tengan precio (ignora la seleccion)')
-    def accion_publicar_todos(self, request, queryset):
-        """Publica todo lo que tenga precio, este seleccionado o no.
+    def get_urls(self):
+        """Una URL propia para el boton de publicar todos.
 
-        Poner el precio ya es la decision de vender: obligar a recorrer la lista
-        otra vez marcando casillas es trabajo repetido. Esta accion ignora la
-        seleccion a proposito y mira TODA la tabla, no solo la pagina visible.
+        Las acciones del admin exigen una seleccion; poner el precio ya es la
+        decision de vender, asi que recorrer la lista otra vez marcando casillas
+        era trabajo repetido. Esta vista no necesita seleccion.
+        """
+        propias = [
+            path('publicar-todos/', self.admin_site.admin_view(self.vista_publicar_todos),
+                 name='radar_publicar_todos'),
+        ]
+        return propias + super().get_urls()
+
+    def vista_publicar_todos(self, request):
+        self._publicar_con_precio(request)
+        return redirect(request.META.get('HTTP_REFERER')
+                        or reverse('admin:radar_juegodetectado_changelist'))
+
+    def _publicar_con_precio(self, request):
+        """Publica todo lo que tenga precio, mire donde mire la seleccion.
 
         No toca lo descartado ni lo vencido: eso se saco de circulacion a
-        proposito y volver a publicarlo seria justo lo contrario de lo pedido.
+        proposito y volver a publicarlo seria justo lo contrario.
         """
         candidatos = (JuegoDetectado.objects
                       .exclude(estado__in=['descartado', 'vencido'])
@@ -250,6 +265,10 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
                 messages.WARNING)
         for mensaje in fallos[:5]:
             self.message_user(request, mensaje, messages.ERROR)
+
+    @admin.action(description='PUBLICAR TODOS los que tengan precio (ignora la seleccion)')
+    def accion_publicar_todos(self, request, queryset):
+        self._publicar_con_precio(request)
 
     @admin.action(description='Solo preparar (precios y region, sin publicar)')
     def accion_aprobar(self, request, queryset):

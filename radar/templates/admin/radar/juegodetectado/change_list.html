@@ -1,0 +1,20 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{# Boton propio para publicar sin tener que marcar casillas.
+
+   Las acciones del admin de Django exigen una seleccion; poner el precio ya es
+   la decision de vender, asi que obligar a recorrer la lista otra vez marcando
+   era trabajo repetido. Este boton llama a una vista propia y no necesita
+   seleccion. #}
+{% block object-tools-items %}
+  <li>
+    <a href="{% url 'admin:radar_publicar_todos' %}"
+       class="addlink"
+       style="background:#27ae60;border-color:#27ae60"
+       onclick="return confirm('Se publicaran TODOS los juegos que tengan precio de codigo o de cuenta. Los descartados y los vencidos no se tocan. Continuar?')">
+      Publicar todos los que tengan precio
+    </a>
+  </li>
+  {{ block.super }}
+{% endblock %}
