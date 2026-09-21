@@ -27,6 +27,14 @@ TIENDAS = [
 # calcula el precio de venta.
 REGION_REFERENCIA = 'CO'
 
+ESTADOS = [
+    ('nuevo', 'Nuevo'),
+    ('aprobado', 'Aprobado'),
+    ('publicado', 'Publicado'),
+    ('descartado', 'Descartado'),
+    ('vencido', 'Vencido'),
+]
+
 
 class ParametrosRadar(models.Model):
     """Parametros de negocio, editables desde el admin sin tocar codigo."""
@@ -44,6 +52,30 @@ class ParametrosRadar(models.Model):
         max_digits=5, decimal_places=2, default=Decimal('10'),
         help_text='Descuento minimo en la tienda de origen para tener en cuenta la oferta.',
     )
+
+    # Valores por defecto al publicar, para no elegirlos juego por juego.
+    consola_xbox = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Consola que se asigna a los juegos de Xbox al publicarlos.',
+    )
+    consola_ps = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Consola que se asigna a los juegos de PlayStation al publicarlos.',
+    )
+    licencia_default = models.ForeignKey(
+        'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Licencia con la que se crea la variante vendible.',
+    )
+    tipo_producto = models.ForeignKey(
+        'products.ProductsType', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Tipo de producto del catalogo con el que se crean los publicados.',
+    )
+    stock_publicacion = models.IntegerField(
+        default=10,
+        help_text='Cuantas unidades queda disponible cada producto publicado. No es stock '
+                  'real: es cuantas ventas se aceptan antes de revisarlo a mano.',
+    )
+
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -119,6 +151,25 @@ class JuegoDetectado(models.Model):
     # Vinculo suelto con el catalogo propio (ver docstring del modulo).
     producto_existente_id = models.IntegerField(null=True, blank=True)
 
+    # --- Aprobacion y publicacion ---
+    estado = models.CharField(max_length=12, choices=ESTADOS, default='nuevo')
+    precio_venta = models.BigIntegerField(
+        null=True, blank=True,
+        help_text='Precio final en pesos. Lo fija el dueno; el radar solo sugiere.',
+    )
+    region_compra = models.CharField(
+        max_length=2, blank=True, default='',
+        help_text='Region elegida para comprarlo. Se congela al aprobar.',
+    )
+    consola = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
+    licencia = models.ForeignKey(
+        'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
+    producto_publicado_id = models.IntegerField(null=True, blank=True)
+    publicado_en = models.DateTimeField(null=True, blank=True)
+
     visto_primero = models.DateTimeField(auto_now_add=True)
     visto_ultimo = models.DateTimeField(auto_now=True)
 
@@ -150,6 +201,107 @@ class JuegoDetectado(models.Model):
         """El precio regional mas barato que ademas se pueda comprar de verdad."""
         candidatos = [p for p in self.precios.all() if p.comprable and p.costo_cop]
         return min(candidatos, key=lambda p: p.costo_cop) if candidatos else None
+
+    @property
+    def vence(self):
+        """Cuando muere la promocion en la region elegida (o en la mas barata)."""
+        elegido = None
+        if self.region_compra:
+            elegido = next((p for p in self.precios.all() if p.region == self.region_compra), None)
+        elegido = elegido or self.mejor_precio()
+        return elegido.fecha_fin if elegido else None
+
+    def publicar(self, parametros=None):
+        """Crea (o actualiza) el producto real del catalogo para este juego.
+
+        Se publica como producto normal a proposito: asi el carrito, las
+        pasarelas y los correos que ya existen funcionan sin tocar nada. La
+        unica diferencia es la bandera `sobre_pedido`, que cambia la promesa de
+        entrega en el frontend.
+
+        Devuelve el producto. Lanza ValueError con un mensaje legible si falta
+        algo por configurar.
+        """
+        from django.utils import timezone
+        from products.models import GameDetail, Products
+
+        parametros = parametros or ParametrosRadar.actuales()
+
+        if not self.precio_venta:
+            raise ValueError('"%s" no tiene precio de venta. Ponle uno antes de publicar.' % self.titulo)
+
+        consola = self.consola or (
+            parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
+        )
+        if consola is None:
+            raise ValueError(
+                'Falta la consola por defecto para %s. Configurala en Parametros del radar.'
+                % self.get_tienda_display()
+            )
+
+        licencia = self.licencia or parametros.licencia_default
+        if licencia is None:
+            raise ValueError('Falta la licencia por defecto. Configurala en Parametros del radar.')
+
+        if parametros.tipo_producto is None:
+            raise ValueError('Falta el tipo de producto por defecto. Configuralo en Parametros del radar.')
+
+        producto = None
+        if self.producto_publicado_id:
+            producto = Products.objects.filter(id_product=self.producto_publicado_id).first()
+
+        if producto is None:
+            producto = Products.objects.create(
+                title=self.titulo[:200],
+                description=self.descripcion or self.titulo,
+                image=self.imagen,
+                type_id=parametros.tipo_producto,
+                calification=self.rating_conteo,
+                sobre_pedido=True,
+                radar_tienda=self.tienda,
+            )
+        else:
+            producto.title = self.titulo[:200]
+            producto.description = self.descripcion or self.titulo
+            producto.image = self.imagen
+            producto.sobre_pedido = True
+            producto.radar_tienda = self.tienda
+            producto.save()
+
+        producto.consola.add(consola)
+
+        variante = GameDetail.objects.filter(
+            producto=producto, consola=consola, licencia=licencia,
+        ).first()
+        if variante is None:
+            variante = GameDetail(producto=producto, consola=consola, licencia=licencia)
+        variante.precio = int(self.precio_venta)
+        variante.precio_descuento = 0
+        variante.stock = parametros.stock_publicacion
+        variante.save()
+
+        self.producto_publicado_id = producto.id_product
+        self.publicado_en = timezone.now()
+        self.estado = 'publicado'
+        self.consola = consola
+        self.licencia = licencia
+        self.save(update_fields=[
+            'producto_publicado_id', 'publicado_en', 'estado', 'consola', 'licencia',
+        ])
+        return producto
+
+    def despublicar(self):
+        """Saca el producto de circulacion sin borrar nada.
+
+        No se borra el producto: puede estar en el historial de una venta. Se
+        deja en stock 0, que es como el sitio ya marca "agotado".
+        """
+        from products.models import GameDetail
+
+        if self.producto_publicado_id:
+            GameDetail.objects.filter(producto_id=self.producto_publicado_id).update(stock=0)
+        self.estado = 'vencido'
+        self.save(update_fields=['estado'])
 
 
 class PrecioRegional(models.Model):

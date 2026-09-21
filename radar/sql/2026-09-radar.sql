@@ -91,3 +91,43 @@ CREATE TABLE IF NOT EXISTS radar_ejecucionradar (
 
 CREATE INDEX IF NOT EXISTS radar_ejecucionradar_inicio_idx
   ON radar_ejecucionradar (inicio DESC);
+
+-- ---------------------------------------------------------------------------
+-- Fase 1: aprobacion y publicacion. Aditivo e idempotente, igual que arriba.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE radar_juegodetectado
+  -- nuevo | aprobado | descartado | publicado | vencido
+  ADD COLUMN IF NOT EXISTS estado varchar(12) NOT NULL DEFAULT 'nuevo',
+  -- Precio que fija el dueno a mano. El radar solo sugiere.
+  ADD COLUMN IF NOT EXISTS precio_venta bigint NULL,
+  -- Region elegida para comprarlo (se congela al aprobar).
+  ADD COLUMN IF NOT EXISTS region_compra varchar(2) NOT NULL DEFAULT '',
+  -- Producto creado en el catalogo al publicar.
+  ADD COLUMN IF NOT EXISTS producto_publicado_id integer NULL,
+  ADD COLUMN IF NOT EXISTS consola_id integer NULL,
+  ADD COLUMN IF NOT EXISTS licencia_id integer NULL,
+  ADD COLUMN IF NOT EXISTS publicado_en timestamp with time zone NULL;
+
+CREATE INDEX IF NOT EXISTS radar_juegodetectado_estado_idx
+  ON radar_juegodetectado (estado);
+
+-- Valores por defecto al publicar, para no elegirlos uno por uno.
+ALTER TABLE radar_parametrosradar
+  ADD COLUMN IF NOT EXISTS consola_xbox_id integer NULL,
+  ADD COLUMN IF NOT EXISTS consola_ps_id integer NULL,
+  ADD COLUMN IF NOT EXISTS licencia_default_id integer NULL,
+  ADD COLUMN IF NOT EXISTS tipo_producto_id integer NULL,
+  -- Cuantas unidades queda disponible cada producto publicado. No es stock
+  -- real: es cuantas ventas se aceptan antes de tener que revisarlo a mano.
+  ADD COLUMN IF NOT EXISTS stock_publicacion integer NOT NULL DEFAULT 10;
+
+-- Bandera en el catalogo: estos productos NO son de entrega inmediata, se
+-- consiguen sobre pedido y se entregan en el horario de la tienda. El frontend
+-- la usa para cambiar la promesa de entrega y no generar reclamos.
+ALTER TABLE products_products
+  ADD COLUMN IF NOT EXISTS sobre_pedido boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS radar_tienda varchar(8) NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS products_products_sobre_pedido_idx
+  ON products_products (sobre_pedido);

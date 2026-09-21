@@ -68,6 +68,13 @@ class Products(models.Model):
     # que exigen que esta fecha exista y sea futura.
     fecha_lanzamiento = models.DateField(null=True, blank=True)
 
+    # Radar de ofertas (ver docs/radar-ofertas.md): producto que NO es de
+    # entrega inmediata -- se consigue sobre pedido y se entrega en el horario
+    # de la tienda. El frontend cambia la promesa de entrega segun esta
+    # bandera, que es lo que evita reclamos por mezclar las dos promesas.
+    sobre_pedido = models.BooleanField(default=False)
+    radar_tienda = models.CharField(max_length=8, blank=True, default='')
+
     def __str__(self):
         return str(self.id_product) + " " + str(self.title)
 

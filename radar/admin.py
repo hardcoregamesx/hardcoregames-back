@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Vista del radar en el admin.
+"""Vista del radar en el admin: revisar oportunidades, aprobarlas y publicarlas.
 
-En esta fase el radar solo recoge datos: aqui se miran, no se publican.
+El flujo es de dos pasos a proposito. "Aprobar" fija el precio sugerido y la
+region mas barata pero no toca la tienda, para poder revisar los precios con
+calma. "Publicar" ya crea el producto real y lo pone a la venta.
 """
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.utils.html import format_html
 
 from radar.models import (
@@ -23,7 +25,9 @@ def _pesos(valor):
 
 @admin.register(ParametrosRadar)
 class ParametrosRadarAdmin(admin.ModelAdmin):
-    list_display = ['__str__', 'factor_precio_venta', 'margen_minimo_cop', 'descuento_minimo_pct', 'actualizado']
+    list_display = ['__str__', 'factor_precio_venta', 'margen_minimo_cop', 'descuento_minimo_pct',
+                    'consola_xbox', 'consola_ps', 'licencia_default', 'tipo_producto',
+                    'stock_publicacion', 'actualizado']
 
     def has_add_permission(self, request):
         # Es una fila unica de configuracion.
@@ -54,17 +58,83 @@ class PrecioRegionalInline(admin.TabularInline):
 @admin.register(JuegoDetectado)
 class JuegoDetectadoAdmin(admin.ModelAdmin):
     list_display = [
-        'titulo', 'tienda', 'col_precio_co', 'col_mejor', 'col_costo',
-        'col_venta', 'col_margen', 'col_vence', 'col_popularidad', 'col_catalogo',
+        'titulo', 'tienda', 'col_estado', 'col_precio_co', 'col_mejor', 'col_costo',
+        'col_venta', 'precio_venta', 'col_margen', 'col_vence', 'col_popularidad',
+        'col_catalogo',
     ]
-    list_filter = ['tienda', 'comprable_co', 'visto_ultimo']
+    list_editable = ['precio_venta']
+    list_filter = ['estado', 'tienda', 'comprable_co', 'visto_ultimo']
     search_fields = ['titulo', 'id_externo', 'generos']
-    readonly_fields = ['visto_primero', 'visto_ultimo']
+    readonly_fields = ['visto_primero', 'visto_ultimo', 'publicado_en', 'producto_publicado_id']
     inlines = [PrecioRegionalInline]
     list_per_page = 50
+    actions = ['accion_aprobar', 'accion_descartar', 'accion_publicar', 'accion_despublicar']
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related('precios')
+
+    @admin.display(description='Estado')
+    def col_estado(self, obj):
+        colores = {
+            'nuevo': '#7f8c8d', 'aprobado': '#2980b9', 'publicado': '#27ae60',
+            'descartado': '#c0392b', 'vencido': '#d35400',
+        }
+        return format_html(
+            '<b style="color:{}">{}</b>', colores.get(obj.estado, '#000'), obj.get_estado_display())
+
+    @admin.action(description='1. Aprobar (fija precio sugerido y region mas barata)')
+    def accion_aprobar(self, request, queryset):
+        parametros = ParametrosRadar.actuales()
+        listos, sin_region = 0, 0
+        for juego in queryset.prefetch_related('precios'):
+            mejor = juego.mejor_precio()
+            if mejor is None:
+                sin_region += 1
+                continue
+            if not juego.precio_venta:
+                juego.precio_venta = juego.precio_venta_sugerido(parametros)
+            juego.region_compra = mejor.region
+            juego.estado = 'aprobado'
+            juego.save(update_fields=['precio_venta', 'region_compra', 'estado'])
+            listos += 1
+        if listos:
+            self.message_user(
+                request,
+                '%s aprobados. Revisa los precios y luego usa "2. Publicar".' % listos,
+                messages.SUCCESS)
+        if sin_region:
+            self.message_user(
+                request,
+                '%s sin region comprable: no se pueden aprobar.' % sin_region,
+                messages.WARNING)
+
+    @admin.action(description='2. Publicar en la tienda (crea el producto)')
+    def accion_publicar(self, request, queryset):
+        parametros = ParametrosRadar.actuales()
+        publicados, fallos = 0, []
+        for juego in queryset.prefetch_related('precios'):
+            try:
+                juego.publicar(parametros)
+                publicados += 1
+            except ValueError as exc:
+                fallos.append(str(exc))
+        if publicados:
+            self.message_user(request, '%s publicados en la tienda.' % publicados, messages.SUCCESS)
+        for mensaje in fallos[:5]:
+            self.message_user(request, mensaje, messages.ERROR)
+
+    @admin.action(description='Descartar')
+    def accion_descartar(self, request, queryset):
+        n = queryset.update(estado='descartado')
+        self.message_user(request, '%s descartados.' % n, messages.SUCCESS)
+
+    @admin.action(description='Retirar de la tienda (deja el producto agotado)')
+    def accion_despublicar(self, request, queryset):
+        n = 0
+        for juego in queryset:
+            juego.despublicar()
+            n += 1
+        self.message_user(request, '%s retirados de la tienda.' % n, messages.SUCCESS)
 
     @admin.display(description='Precio Colombia')
     def col_precio_co(self, obj):
