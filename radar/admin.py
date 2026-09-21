@@ -159,7 +159,7 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
     inlines = [PrecioRegionalInline]
     list_per_page = 50
     ordering = ['-rating_conteo', 'titulo']
-    actions = ['accion_aprobar', 'accion_descartar', 'accion_publicar', 'accion_despublicar']
+    actions = ['accion_publicar', 'accion_aprobar', 'accion_descartar', 'accion_despublicar']
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related('precios')
@@ -173,51 +173,50 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
         return format_html(
             '<b style="color:{}">{}</b>', colores.get(obj.estado, '#000'), obj.get_estado_display())
 
-    @admin.action(description='1. Aprobar (fija precio sugerido y region mas barata)')
-    def accion_aprobar(self, request, queryset):
+    @admin.action(description='PUBLICAR en la tienda (pone los juegos a la venta)')
+    def accion_publicar(self, request, queryset):
+        """Publica en un solo paso.
+
+        Antes habia que aprobar y luego publicar. Quien ya escribio los precios
+        no tiene por que dar dos pasos, asi que la preparacion va incluida. La
+        accion sigue siendo explicita a proposito: escribir un precio suele ser
+        para ver como queda el margen, y publicar al guardar dejaria juegos a la
+        venta por accidente.
+        """
         parametros = ParametrosRadar.actuales()
-        listos, sin_region = 0, 0
+        publicados, sin_region, fallos = 0, 0, []
         for juego in queryset.prefetch_related('precios'):
-            mejor = juego.mejor_precio()
-            if mejor is None:
+            if not juego.preparar(parametros):
                 sin_region += 1
                 continue
-            # Se prellenan los dos; borrar uno es como se dice "esta
-            # modalidad no la ofrezco para este juego".
-            if not juego.precio_venta:
-                juego.precio_venta = juego.precio_venta_sugerido(parametros)
-            if not juego.precio_cuenta:
-                juego.precio_cuenta = juego.precio_cuenta_sugerido(parametros)
-            juego.region_compra = mejor.region
-            juego.estado = 'aprobado'
-            juego.save(update_fields=[
-                'precio_venta', 'precio_cuenta', 'region_compra', 'estado'])
-            listos += 1
-        if listos:
-            self.message_user(
-                request,
-                '%s aprobados. Revisa los precios y luego usa "2. Publicar".' % listos,
-                messages.SUCCESS)
-        if sin_region:
-            self.message_user(
-                request,
-                '%s sin region comprable: no se pueden aprobar.' % sin_region,
-                messages.WARNING)
-
-    @admin.action(description='2. Publicar en la tienda (crea el producto)')
-    def accion_publicar(self, request, queryset):
-        parametros = ParametrosRadar.actuales()
-        publicados, fallos = 0, []
-        for juego in queryset.prefetch_related('precios'):
             try:
                 juego.publicar(parametros)
                 publicados += 1
             except ValueError as exc:
                 fallos.append(str(exc))
         if publicados:
-            self.message_user(request, '%s publicados en la tienda.' % publicados, messages.SUCCESS)
+            self.message_user(
+                request, '%s juegos publicados y ya visibles en la landing.' % publicados,
+                messages.SUCCESS)
+        if sin_region:
+            self.message_user(
+                request, '%s sin region donde comprarlos: no se publicaron.' % sin_region,
+                messages.WARNING)
         for mensaje in fallos[:5]:
             self.message_user(request, mensaje, messages.ERROR)
+
+    @admin.action(description='Solo preparar (precios y region, sin publicar)')
+    def accion_aprobar(self, request, queryset):
+        parametros = ParametrosRadar.actuales()
+        listos = 0
+        for juego in queryset.prefetch_related('precios'):
+            if juego.preparar(parametros):
+                juego.estado = 'aprobado'
+                juego.save(update_fields=['estado'])
+                listos += 1
+        self.message_user(
+            request, '%s preparados. Revisa los precios y luego publica.' % listos,
+            messages.SUCCESS)
 
     @admin.action(description='Descartar')
     def accion_descartar(self, request, queryset):

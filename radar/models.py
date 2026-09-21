@@ -352,6 +352,34 @@ class JuegoDetectado(models.Model):
         elegido = elegido or self.mejor_precio()
         return elegido.fecha_fin if elegido else None
 
+    def preparar(self, parametros=None):
+        """Deja el juego listo para publicar: region congelada y precios puestos.
+
+        Se separa de `publicar` porque tambien la usa la accion "Aprobar", pero
+        `publicar` la llama sola: quien ya escribio los precios no tiene por que
+        dar dos pasos. Nunca pisa un precio escrito a mano.
+
+        Devuelve False si no hay ninguna region donde se pueda comprar.
+        """
+        parametros = parametros or ParametrosRadar.actuales()
+        mejor = self.mejor_precio()
+        if mejor is None:
+            return False
+
+        cambios = []
+        if not self.region_compra:
+            # Sin esto la landing no sabe de que promocion sacar la fecha, y las
+            # tarjetas saldrian sin cuenta atras.
+            self.region_compra = mejor.region
+            cambios.append('region_compra')
+        if not self.precio_venta and not self.precio_cuenta:
+            self.precio_venta = self.precio_venta_sugerido(parametros)
+            self.precio_cuenta = self.precio_cuenta_sugerido(parametros)
+            cambios += ['precio_venta', 'precio_cuenta']
+        if cambios:
+            self.save(update_fields=cambios)
+        return True
+
     def publicar(self, parametros=None):
         """Crea (o actualiza) el producto real del catalogo para este juego.
 
