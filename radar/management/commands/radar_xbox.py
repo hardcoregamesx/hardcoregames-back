@@ -23,6 +23,7 @@ from radar.models import (
     ParametrosRadar,
     PrecioRegional,
     TasaCambio,
+    TasaTienda,
 )
 from radar.tiendas import xbox
 
@@ -180,6 +181,14 @@ class Command(BaseCommand):
             return len(fichas), 0
 
         tasas = TasaCambio.mapa()
+        # El saldo de Xbox se compra como gift card con descuento, asi que un
+        # dolar gastado alli cuesta menos que un dolar de mercado. Usar la TRM
+        # a secas subestimaria el margen y descartaria oportunidades reales.
+        tasa_tienda = TasaTienda.objects.filter(tienda='XBOX').first()
+        if tasa_tienda and 'USD' in tasas:
+            tasas['USD'] = (tasas['USD'] * tasa_tienda.factor)
+            self.stdout.write('  Dolar de saldo Xbox: factor %s -> %s COP por dolar'
+                              % (tasa_tienda.factor, tasas['USD'].quantize(Decimal('0.01'))))
         faltantes = sorted({o['moneda'] for lista in por_region.values() for o in lista if o['moneda'] not in tasas})
         if faltantes:
             self.stderr.write(self.style.WARNING(

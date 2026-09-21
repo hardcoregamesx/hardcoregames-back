@@ -14,6 +14,7 @@ from radar.models import (
     ParametrosRadar,
     PrecioRegional,
     TasaCambio,
+    TasaTienda,
 )
 
 
@@ -35,6 +36,24 @@ class ParametrosRadarAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(TasaTienda)
+class TasaTiendaAdmin(admin.ModelAdmin):
+    list_display = ['tienda', 'factor', 'col_descuento', 'col_pesos', 'muestras', 'manual', 'actualizado']
+    list_editable = ['factor', 'manual']
+    readonly_fields = ['muestras', 'nota', 'actualizado']
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.display(description='Descuento')
+    def col_descuento(self, obj):
+        return '%.1f%%' % ((1 - float(obj.factor)) * 100)
+
+    @admin.display(description='Pesos por dolar de saldo')
+    def col_pesos(self, obj):
+        return _pesos(obj.cop_por_dolar)
 
 
 @admin.register(TasaCambio)

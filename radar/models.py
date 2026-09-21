@@ -125,6 +125,53 @@ class TasaCambio(models.Model):
         return {t.moneda: t.cop_por_unidad for t in cls.objects.all()}
 
 
+class TasaTienda(models.Model):
+    """Cuanto cuesta un dolar de SALDO en cada tienda, que no es un dolar normal.
+
+    El dueno no compra dolares para gastar en la tienda: compra gift cards, y
+    esas se consiguen con descuento en buysellvouchers.com. Un dolar de saldo
+    de Xbox sale por ~0,91 USD y uno de PSN por ~0,93: son dos tasas distintas,
+    y esa diferencia es margen que ninguna API de divisas conoce.
+
+    El costo final en pesos se compone: `factor` (el descuento de la gift card,
+    que se lee a diario) x lo que cuesta un dolar de verdad (TasaCambio['USD'],
+    editable a mano).
+    """
+
+    tienda = models.CharField(max_length=8, primary_key=True, choices=TIENDAS)
+    factor = models.DecimalField(
+        max_digits=8, decimal_places=6,
+        help_text='Dolares que cuesta 1 dolar de saldo. 0.91 = 9% de descuento.',
+    )
+    muestras = models.IntegerField(
+        default=0, help_text='Cuantas ofertas se leyeron para calcularlo.')
+    manual = models.BooleanField(
+        default=False, help_text='Si esta marcada, el actualizador automatico no la toca.')
+    nota = models.CharField(max_length=300, blank=True, default='')
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        verbose_name = 'una tasa por tienda'
+        verbose_name_plural = 'Tasas por tienda (dolar de saldo)'
+        ordering = ['tienda']
+
+    def __str__(self):
+        return '%s: 1 USD de saldo = %s USD' % (self.get_tienda_display(), self.factor)
+
+    @property
+    def cop_por_dolar(self):
+        """Pesos que cuesta un dolar de saldo de esta tienda."""
+        usd = TasaCambio.objects.filter(moneda='USD').first()
+        if usd is None:
+            return None
+        return (self.factor * usd.cop_por_unidad).quantize(Decimal('0.01'))
+
+    @classmethod
+    def mapa(cls):
+        return {t.tienda: t for t in cls.objects.all()}
+
+
 class JuegoDetectado(models.Model):
     """Un juego visto por el radar, con su ficha y su precio de referencia en Colombia."""
 

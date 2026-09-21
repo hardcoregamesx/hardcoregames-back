@@ -131,3 +131,17 @@ ALTER TABLE products_products
 
 CREATE INDEX IF NOT EXISTS products_products_sobre_pedido_idx
   ON products_products (sobre_pedido);
+
+-- ---------------------------------------------------------------------------
+-- El dolar de saldo de cada tienda. No es un dolar normal: el saldo se compra
+-- como gift card con descuento en buysellvouchers, y el descuento NO es el
+-- mismo en Xbox que en PSN. El costo real se compone factor x TasaCambio.USD.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS radar_tasatienda (
+  tienda varchar(8) PRIMARY KEY,           -- 'XBOX' | 'PS'
+  factor numeric(8,6) NOT NULL,            -- dolares que cuesta 1 dolar de saldo
+  muestras integer NOT NULL DEFAULT 0,
+  manual boolean NOT NULL DEFAULT false,
+  nota varchar(300) NOT NULL DEFAULT '',
+  actualizado timestamp with time zone NOT NULL DEFAULT now()
+);

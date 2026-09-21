@@ -68,14 +68,49 @@ docker exec hc-django python manage.py radar_reporte --min-resenas 20   # solo l
 15 6 * * * docker exec hc-django python manage.py radar_xbox   >> /opt/hardcoregames/radar.log 2>&1
 ```
 
-## El dolar es manual, a proposito
+## El dolar de saldo no es el dolar de mercado
 
-`TasaCambio` tiene una casilla **manual**. El dolar viene marcado asi porque se consigue por
-debajo de la TRM, y ese descuento es margen que ninguna API conoce. `radar_tasas` **no lo
-sobrescribe**: hay que editarlo en el admin con el costo real de conseguir divisa. Las demas
-monedas se actualizan solas.
+Esta es la pieza que mas cambia los margenes, y conviene entenderla.
 
-El rial saudi esta anclado al dolar a 3,75 desde 1986; no cambia.
+El negocio **no compra dolares** para gastarlos en la tienda: compra **saldo**, en forma de
+gift cards, y ese saldo se consigue con descuento en buysellvouchers.com. Una tarjeta Xbox de
+1 USD se paga alrededor de 0,91 USD. Ese 9% es margen que la TRM no ve.
+
+Y el descuento **no es el mismo en las dos tiendas**. Medido el 21/09/2026:
+
+| Tienda | 1 USD de saldo cuesta | Descuento |
+|---|---|---|
+| Xbox | 0,910 USD | 9,0% |
+| PlayStation | 0,930 USD | 7,0% |
+
+Por eso el costo se compone de dos factores, cada uno con su propia fuente:
+
+```
+pesos por dolar de saldo = factor_de_la_tienda  x  TasaCambio['USD']
+                           (se lee a diario)        (lo que cuesta un dolar de verdad)
+```
+
+El **factor** vive en *Tasas por tienda* y lo actualiza `radar_tasas` todos los dias. El
+**dolar de verdad** vive en *Tasas de cambio* y es manual: se siembra con la TRM, pero hay que
+editarlo con lo que de verdad cuesta conseguir divisa. Las dos casillas tienen un interruptor
+**manual** que congela el valor si se prefiere fijarlo a mano.
+
+Se toma la **mediana de las tres ofertas mas baratas**, no el minimo absoluto: la oferta mas
+barata suele ser de un vendedor con una unidad y mala reputacion, y fijar precios de venta con
+ella daria un margen que no existe.
+
+Si buysellvouchers falla, se avisa y **se conserva el valor del dia anterior**. Una tasa de
+ayer es mucho mejor que ninguna.
+
+**A futuro:** buysellvouchers tiene una API oficial (hub.buysellvouchers.com/giftcard-api/)
+con catalogo en vivo, que es el camino correcto. Las llaves solo se dan a compradores ya
+registrados y previa revision, asi que hay que solicitarla. Mientras tanto se lee la pagina
+publica del listado, que su robots.txt permite (solo bloquea URLs con parametros) y que sirve
+los precios en el HTML sin necesidad de JavaScript. Una lectura al dia, con User-Agent
+identificado.
+
+Las demas monedas se actualizan solas. El rial saudi esta anclado al dolar a 3,75 desde 1986;
+no cambia.
 
 ## Cuando se rompa
 

@@ -5,7 +5,8 @@ from decimal import Decimal, InvalidOperation
 import requests
 from django.core.management.base import BaseCommand
 
-from radar.models import TasaCambio
+from radar.models import TasaCambio, TasaTienda
+from radar.tiendas import vouchers
 
 # Base USD, gratis y sin llave. Cubre COP, TRY, INR y SAR.
 API_TASAS = 'https://open.er-api.com/v6/latest/USD'
@@ -108,10 +109,50 @@ class Command(BaseCommand):
                 )
                 escritas += 1
 
+        self._dolar_de_saldo(dry_run)
+
         if dry_run:
             self.stdout.write(self.style.WARNING('Modo --dry-run: no se escribio nada.'))
         else:
             self.stdout.write(self.style.SUCCESS('Tasas actualizadas: %s' % escritas))
+
+    def _dolar_de_saldo(self, dry_run):
+        """El dolar de saldo de cada tienda, desde buysellvouchers.
+
+        Si falla se avisa y se sigue con el valor anterior: quedarse con una
+        tasa de ayer es mucho mejor que dejar al radar sin ninguna.
+        """
+        self.stdout.write('Dolar de saldo (buysellvouchers):')
+        existentes = TasaTienda.mapa()
+
+        for tienda in ('XBOX', 'PS'):
+            actual = existentes.get(tienda)
+            if actual and actual.manual:
+                self.stdout.write('  %-5s = %s USD (manual, sin tocar)' % (tienda, actual.factor))
+                continue
+            try:
+                resultado = vouchers.factor_dolar(tienda)
+            except vouchers.ErrorVouchers as exc:
+                anterior = ('se mantiene %s de %s' % (actual.factor, actual.actualizado.strftime('%d/%m'))
+                            if actual else 'no hay valor anterior')
+                self.stderr.write(self.style.WARNING('  %-5s FALLO: %s (%s)' % (tienda, exc, anterior)))
+                continue
+
+            factor = resultado['factor']
+            descuento = (Decimal('1') - factor) * 100
+            self.stdout.write('  %-5s = %s USD  (%.1f%% de descuento, %s ofertas leidas)'
+                              % (tienda, factor, descuento, resultado['muestras']))
+            if not dry_run:
+                TasaTienda.objects.update_or_create(
+                    tienda=tienda,
+                    defaults={
+                        'factor': factor,
+                        'muestras': resultado['muestras'],
+                        'manual': False,
+                        'nota': 'Mediana de las 3 mejores: %s' % '; '.join(
+                            '%s (%s)' % (t[:40], f) for t, f in resultado['usadas']),
+                    },
+                )
 
     def _trm(self):
         """TRM oficial, solo como valor inicial del dolar."""
