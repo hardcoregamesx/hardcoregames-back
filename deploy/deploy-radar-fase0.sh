@@ -43,6 +43,30 @@ echo "== 5/7 Promoviendo la imagen a produccion"
 bash /root/deploy_hc.sh hc-django promote "$TAG"
 docker ps --filter name=hc-django --format "   {{.Names}} {{.Status}}"
 
+# Comprobar que el admin siga en pie. Si la herramienta de chequeo no esta
+# disponible se avisa y se sigue: no tiene sentido revertir un despliegue sano
+# solo porque falta `curl` en el host.
+if command -v curl >/dev/null 2>&1; then
+  echo "   comprobando que el admin siga respondiendo..."
+  OK=0
+  for i in $(seq 1 20); do
+    CODIGO=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+      https://admin.hardcoregames.co/admin/login/ || echo 000)
+    case "$CODIGO" in
+      200|301|302) OK=1; echo "   admin responde ($CODIGO)"; break ;;
+    esac
+    sleep 3
+  done
+  if [ "$OK" -ne 1 ]; then
+    echo "ERROR: el admin no responde tras un minuto (ultimo codigo: $CODIGO). Revirtiendo."
+    bash /root/deploy_hc.sh hc-django rollback
+    exit 1
+  fi
+else
+  echo "   AVISO: no hay curl en el host, no se pudo comprobar el admin."
+  echo "          Abre https://admin.hardcoregames.co/admin/ y confirma que carga."
+fi
+
 echo "== 6/7 Sembrando tasas de cambio y primera corrida del radar"
 docker exec hc-django python manage.py radar_tasas
 docker exec hc-django python manage.py radar_xbox
@@ -50,17 +74,46 @@ docker exec hc-django python manage.py radar_reporte --top 15 --min-resenas 20
 
 echo "== 7/7 Instalando el cron diario (idempotente)"
 LOG=/opt/hardcoregames/radar.log
-if crontab -l 2>/dev/null | grep -q 'radar_xbox'; then
+RESPALDO=/root/crontab-antes-de-radar-$(date +%Y%m%d-%H%M%S).txt
+
+# El crontab de este servidor tiene los chequeos de pagos, los backups y los
+# sorteos. Reescribirlo mal los borra en silencio, asi que aqui no se toca nada
+# sin haberlo respaldado y sin que el contenido tenga sentido.
+if ! crontab -l > "$RESPALDO" 2>/dev/null; then
+  echo "ERROR: no se pudo leer el crontab actual. No se toca nada."
+  echo "       Agrega estas dos lineas a mano con 'crontab -e':"
+  echo "       0 6 * * *  docker exec hc-django python manage.py radar_tasas >> $LOG 2>&1"
+  echo "       15 6 * * * docker exec hc-django python manage.py radar_xbox  >> $LOG 2>&1"
+  exit 1
+fi
+
+ANTES=$(grep -cve '^[[:space:]]*$' "$RESPALDO" || true)
+if [ "$ANTES" -lt 5 ]; then
+  echo "ERROR: el crontab actual tiene solo $ANTES lineas utiles y se esperaban muchas mas."
+  echo "       Algo no cuadra; no se reescribe. Respaldo en $RESPALDO"
+  exit 1
+fi
+echo "   crontab respaldado en $RESPALDO ($ANTES lineas)"
+
+if grep -q 'radar_xbox' "$RESPALDO"; then
   echo "   el cron del radar ya existia, no se toca"
 else
-  ( crontab -l 2>/dev/null
+  {
+    cat "$RESPALDO"
     echo "# Radar de ofertas (docs/radar-ofertas.md). Las tasas van antes que el radar."
     echo "0 6 * * *  docker exec hc-django python manage.py radar_tasas >> $LOG 2>&1"
     echo "15 6 * * * docker exec hc-django python manage.py radar_xbox  >> $LOG 2>&1"
-  ) | crontab -
-  echo "   cron instalado"
+  } | crontab -
+
+  DESPUES=$(crontab -l | grep -cve '^[[:space:]]*$' || true)
+  if [ "$DESPUES" -lt "$ANTES" ]; then
+    echo "ERROR: el crontab quedo con menos lineas que antes ($DESPUES < $ANTES). Restaurando."
+    crontab "$RESPALDO"
+    exit 1
+  fi
+  echo "   cron instalado ($ANTES -> $DESPUES lineas)"
 fi
-crontab -l | grep -A1 'Radar de ofertas' || true
+crontab -l | grep -A2 'Radar de ofertas' || true
 
 echo
 echo "Listo. La fase 0 esta corriendo."
