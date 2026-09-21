@@ -64,7 +64,29 @@ class ParametrosRadar(models.Model):
     )
     licencia_default = models.ForeignKey(
         'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='+', help_text='Licencia con la que se crea la variante vendible.',
+        related_name='+',
+        help_text='Licencia principal. El "precio sugerido" del listado es para ESTA licencia.',
+    )
+
+    # Una cuenta no se vende al mismo precio que un codigo. Estas dos quedan
+    # VACIAS a proposito: hasta que se llenen, el radar publica una sola
+    # variante y no inventa precios de cuentas. Un precio inventado en una
+    # tienda viva es peor que una funcion que falta.
+    licencia_primaria = models.ForeignKey(
+        'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Licencia de cuenta primaria. Dejar vacia para no publicarla.',
+    )
+    factor_primaria = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        help_text='Precio primaria = precio_colombia x este factor. Ej: 0.45',
+    )
+    licencia_secundaria = models.ForeignKey(
+        'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Licencia de cuenta secundaria. Dejar vacia para no publicarla.',
+    )
+    factor_secundaria = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        help_text='Precio secundaria = precio_colombia x este factor. Ej: 0.30',
     )
     tipo_producto = models.ForeignKey(
         'products.ProductsType', null=True, blank=True, on_delete=models.SET_NULL,
@@ -238,11 +260,36 @@ class JuegoDetectado(models.Model):
         return self.precio_co
 
     def precio_venta_sugerido(self, parametros=None):
+        """Sugerido para la licencia principal (la de Parametros)."""
         base = self.precio_co_vigente
         if not base:
             return None
         parametros = parametros or ParametrosRadar.actuales()
         return int(base * parametros.factor_precio_venta)
+
+    def sugeridos_por_licencia(self, parametros=None):
+        """Precio sugerido para cada licencia configurada.
+
+        Existe porque un codigo y una cuenta no valen lo mismo: mostrar un solo
+        numero sin decir de que licencia habla induce a publicar una cuenta al
+        precio de un codigo. Devuelve [(nombre_licencia, precio), ...] y solo
+        incluye las licencias que esten configuradas.
+        """
+        base = self.precio_co_vigente
+        if not base:
+            return []
+        parametros = parametros or ParametrosRadar.actuales()
+        filas = []
+        combinaciones = (
+            (parametros.licencia_default, parametros.factor_precio_venta),
+            (parametros.licencia_primaria, parametros.factor_primaria),
+            (parametros.licencia_secundaria, parametros.factor_secundaria),
+        )
+        for licencia, factor in combinaciones:
+            if licencia is None or not factor:
+                continue
+            filas.append((str(licencia), int(base * factor)))
+        return filas
 
     def mejor_precio(self):
         """El precio regional mas barato que ademas se pueda comprar de verdad."""
@@ -339,20 +386,37 @@ class JuegoDetectado(models.Model):
 
         producto.consola.add(consola)
 
-        variante = GameDetail.objects.filter(
-            producto=producto, consola=consola, licencia=licencia,
-        ).first()
-        if variante is None:
-            variante = GameDetail(producto=producto, consola=consola, licencia=licencia)
-        variante.precio = int(self.precio_venta)
-        variante.precio_descuento = 0
-        variante.stock = parametros.stock_publicacion
-        # Reserva con anticipo = precio total: el cliente paga el 100% hoy y no
-        # se le mandan credenciales hasta que exista la cuenta real.
-        variante.reserva_activa = True
-        variante.monto_reserva = int(self.precio_venta)
-        variante.cuotas_activas = False
-        variante.save()
+        def _variante(lic, precio):
+            v = GameDetail.objects.filter(
+                producto=producto, consola=consola, licencia=lic,
+            ).first()
+            if v is None:
+                v = GameDetail(producto=producto, consola=consola, licencia=lic)
+            v.precio = int(precio)
+            v.precio_descuento = 0
+            v.stock = parametros.stock_publicacion
+            # Reserva con anticipo = precio total: el cliente paga el 100% hoy
+            # y no se le mandan credenciales hasta que exista la cuenta real.
+            v.reserva_activa = True
+            v.monto_reserva = int(precio)
+            v.cuotas_activas = False
+            v.save()
+            return v
+
+        _variante(licencia, self.precio_venta)
+
+        # Cuentas: solo si estan configuradas. Un codigo y una cuenta no valen
+        # lo mismo, asi que cada una lleva su propio factor sobre el precio de
+        # Colombia. Sin configurar, no se publica ninguna: mejor que falte una
+        # variante a que salga a un precio inventado.
+        base = self.precio_co_vigente
+        if base:
+            for lic, factor in (
+                (parametros.licencia_primaria, parametros.factor_primaria),
+                (parametros.licencia_secundaria, parametros.factor_secundaria),
+            ):
+                if lic is not None and factor and lic.pk != licencia.pk:
+                    _variante(lic, int(base * factor))
 
         self.producto_publicado_id = producto.id_product
         self.publicado_en = timezone.now()

@@ -27,8 +27,10 @@ def _pesos(valor):
 @admin.register(ParametrosRadar)
 class ParametrosRadarAdmin(admin.ModelAdmin):
     list_display = ['__str__', 'factor_precio_venta', 'margen_minimo_cop', 'descuento_minimo_pct',
-                    'consola_xbox', 'consola_ps', 'licencia_default', 'tipo_producto',
-                    'stock_publicacion', 'actualizado']
+                    'consola_xbox', 'consola_ps', 'licencia_default',
+                    'licencia_primaria', 'factor_primaria',
+                    'licencia_secundaria', 'factor_secundaria',
+                    'tipo_producto', 'stock_publicacion', 'actualizado']
 
     def has_add_permission(self, request):
         # Es una fila unica de configuracion.
@@ -173,7 +175,13 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
 
     @admin.display(description='Venta sugerida')
     def col_venta(self, obj):
-        return _pesos(obj.precio_venta_sugerido())
+        # Sin decir a que licencia corresponde, este numero induce a publicar
+        # una cuenta al precio de un codigo.
+        filas = obj.sugeridos_por_licencia()
+        if not filas:
+            return _pesos(obj.precio_venta_sugerido())
+        return format_html('<br>'.join('{}: {}'.format(nombre, _pesos(precio))
+                                       for nombre, precio in filas))
 
     @admin.display(description='Margen')
     def col_margen(self, obj):
