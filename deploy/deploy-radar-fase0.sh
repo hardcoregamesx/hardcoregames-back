@@ -30,14 +30,21 @@ docker run --rm --network hc-net --env-file /root/hc/hc-django.env \
   "hc-django:$TAG" python manage.py check
 echo "   check OK"
 
-echo "== 4/7 Aplicando la migracion de la app radar"
-# SOLO la app radar: `products` no tiene migraciones y un `migrate` a secas
-# intentaria cosas que no debe (ver docs/radar-ofertas.md).
-docker run --rm --network hc-net --env-file /root/hc/hc-django.env \
-  "hc-django:$TAG" python manage.py migrate radar
-docker exec hc-postgres psql -U hardcoregames -d hardcoregames -tAc \
-  "select count(*) from information_schema.tables where table_name like 'radar_%'" \
-  | tr -d ' '
+echo "== 4/7 Creando las tablas del radar (SQL aditivo, idempotente)"
+# Este proyecto NO usa `migrate` en ningun app: el `users` declara una relacion
+# hacia auth.User sin tener migraciones propias, asi que Django se niega a
+# construir el grafo. El esquema se crea con SQL directo, igual que en
+# products/sql y membership/sql. Ver docs/radar-ofertas.md.
+docker exec -i hc-postgres psql -U hardcoregames -d hardcoregames -v ON_ERROR_STOP=1 \
+  < "$REPO/radar/sql/2026-09-radar.sql"
+
+TABLAS=$(docker exec hc-postgres psql -U hardcoregames -d hardcoregames -tAc \
+  "select count(*) from information_schema.tables where table_name like 'radar\\_%'" | tr -d ' ')
+if [ "$TABLAS" -ne 5 ]; then
+  echo "ERROR: se esperaban 5 tablas radar_* y hay $TABLAS. No se promueve nada."
+  exit 1
+fi
+echo "   las 5 tablas radar_* existen"
 
 echo "== 5/7 Promoviendo la imagen a produccion"
 bash /root/deploy_hc.sh hc-django promote "$TAG"

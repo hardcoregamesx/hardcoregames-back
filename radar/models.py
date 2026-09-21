@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """Modelos del radar de ofertas de tiendas digitales (Xbox / PlayStation).
 
-Esta app es deliberadamente independiente de `products`: `products` NO tiene
-migraciones (su esquema se administra por fuera de Django), asi que cualquier
-relacion formal hacia sus modelos haria imposible migrar esta app. Por eso el
-vinculo con el catalogo propio se guarda como un entero suelto
-(`JuegoDetectado.producto_existente_id`) y no como ForeignKey.
+Este proyecto NO usa `migrate` en ningun app (ver la cabecera de
+membership/models.py). El `users` declara una relacion hacia `auth.User` sin
+tener migraciones propias, asi que Django se niega a construir el grafo de
+migraciones para cualquier app. Por eso aqui, como en membership, rewards y las
+tablas nuevas de products: `managed = False` y el esquema se crea con SQL
+directo desde radar/sql/2026-09-radar.sql, que es la fuente de verdad.
+
+Ademas esta app es independiente de `products`: el vinculo con el catalogo
+propio se guarda como un entero suelto (`JuegoDetectado.producto_existente_id`)
+y no como ForeignKey.
 
 Ver docs/radar-ofertas.md.
 """
@@ -42,6 +47,7 @@ class ParametrosRadar(models.Model):
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
+        managed = False
         verbose_name = 'parametros del radar'
         verbose_name_plural = 'Parametros del radar'
 
@@ -74,6 +80,7 @@ class TasaCambio(models.Model):
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
+        managed = False
         verbose_name = 'una tasa de cambio'
         verbose_name_plural = 'Tasas de cambio'
         ordering = ['moneda']
@@ -116,6 +123,7 @@ class JuegoDetectado(models.Model):
     visto_ultimo = models.DateTimeField(auto_now=True)
 
     class Meta:
+        managed = False
         verbose_name = 'un juego detectado'
         verbose_name_plural = 'Juegos detectados'
         unique_together = [('tienda', 'id_externo')]
@@ -166,6 +174,7 @@ class PrecioRegional(models.Model):
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
+        managed = False
         verbose_name = 'un precio regional'
         verbose_name_plural = 'Precios regionales'
         unique_together = [('juego', 'region')]
@@ -197,6 +206,7 @@ class EjecucionRadar(models.Model):
     error = models.TextField(blank=True, default='')
 
     class Meta:
+        managed = False
         verbose_name = 'una ejecucion del radar'
         verbose_name_plural = 'Ejecuciones del radar'
         ordering = ['-inicio']

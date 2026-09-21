@@ -120,16 +120,31 @@ juego por juego. Por eso Xbox va primero.
 Ademas, Sony dolarizo Latinoamerica: la tienda colombiana cotiza en dolares al mismo precio
 que la de USA. Comprar PS en USA ya no da margen de precio, solo el de la divisa.
 
-## Por que esta app no toca `products`
+## Por que aqui no hay migraciones de Django
 
-La app `products` **no tiene migraciones** — su esquema se administra por fuera de Django.
-Una relacion formal hacia sus modelos haria imposible migrar esta app. Por eso el vinculo con
-el catalogo propio es un entero suelto (`JuegoDetectado.producto_existente_id`) y el cruce se
-hace por titulo normalizado. Nunca correr `migrate` sin nombrar la app:
+**Este proyecto no usa `migrate` en ningun app, y no es una preferencia: no puede.** El app
+`users` declara una relacion hacia `auth.User` (que si tiene migraciones) sin tener
+migraciones propias, y Django se niega a construir el grafo de migraciones en esa situacion.
+Cualquier `migrate`, aunque sea de un app nuevo y aislado, falla con:
+
+```
+...to a model in an app with migrations (e.g. contrib.auth) in an app with no migrations
+```
+
+Por eso todos los modelos del radar son `managed = False` y el esquema se crea con SQL
+directo desde **`radar/sql/2026-09-radar.sql`**, que es la fuente de verdad. Es el mismo
+patron de `products/sql/`, `membership/sql/` y las tablas de `rewards`.
 
 ```bash
-docker exec hc-django python manage.py migrate radar
+docker exec -i hc-postgres psql -U hardcoregames -d hardcoregames -v ON_ERROR_STOP=1   < /opt/hardcoregames/repos/django/radar/sql/2026-09-radar.sql
 ```
+
+Si se agrega un campo a un modelo del radar, hay que agregar la columna en ese SQL a mano.
+No hay `makemigrations` que lo haga.
+
+Aparte, esta app tampoco tiene relaciones formales hacia `products`: el vinculo con el
+catalogo propio es un entero suelto (`JuegoDetectado.producto_existente_id`) y el cruce se
+hace por titulo normalizado.
 
 ## Despliegue
 
