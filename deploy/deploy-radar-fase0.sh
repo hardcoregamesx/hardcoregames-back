@@ -92,7 +92,11 @@ if [ "$SANO" -ne 1 ]; then
   echo "   El despliegue sigue en pie, pero revisa el aviso de arriba."
 fi
 
-echo "== 6/7 Sembrando tasas de cambio y primera corrida del radar"
+echo "== 6/7 Permisos, tasas y primera corrida del radar"
+# Los permisos del admin normalmente los crea `migrate`, que aqui no se puede
+# correr. Sin ellos un usuario de staff ve 404 en las pantallas del radar.
+docker exec hc-django python manage.py radar_permisos || echo "   AVISO: no se pudieron crear los permisos del radar"
+
 # A esta altura la imagen ya esta promovida y el despliegue es un exito. Que la
 # primera corrida del radar tropiece con un corte de red no es motivo para
 # abortar: el cron la repite manana, y se puede relanzar a mano. Por eso estos
