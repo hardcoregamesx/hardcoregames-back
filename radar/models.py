@@ -215,13 +215,25 @@ class JuegoDetectado(models.Model):
         """Crea (o actualiza) el producto real del catalogo para este juego.
 
         Se publica como producto normal a proposito: asi el carrito, las
-        pasarelas y los correos que ya existen funcionan sin tocar nada. La
-        unica diferencia es la bandera `sobre_pedido`, que cambia la promesa de
-        entrega en el frontend.
+        pasarelas y los correos que ya existen funcionan sin tocar nada.
+
+        Dos diferencias con un producto de catalogo:
+
+        1. `sobre_pedido = True`, que cambia la promesa de entrega en el
+           frontend (no es inmediata: se entrega en horario de tienda).
+        2. La variante se publica en modo **reserva** con el anticipo igual al
+           precio total. Eso es lo que hace que funcione sin tener la cuenta:
+           el checkout de reserva no crea SaleDetail ni manda credenciales
+           (docs/cuotas-y-reserva.md §4.3), asi que el cliente paga, el pedido
+           queda esperando, y la cuenta real se asigna despues desde
+           "Planes de pago" con la accion "Entregar pedido". Sin esto, la
+           primera venta fallaria al intentar leer una cuenta que no existe.
 
         Devuelve el producto. Lanza ValueError con un mensaje legible si falta
         algo por configurar.
         """
+        from datetime import timedelta
+
         from django.utils import timezone
         from products.models import GameDetail, Products
 
@@ -246,6 +258,14 @@ class JuegoDetectado(models.Model):
         if parametros.tipo_producto is None:
             raise ValueError('Falta el tipo de producto por defecto. Configuralo en Parametros del radar.')
 
+        # El modo reserva exige una fecha de lanzamiento futura. Se usa el dia
+        # siguiente al fin de la promocion: mientras el producto este publicado
+        # esa fecha siempre esta por delante, y cuando la promocion vence el
+        # producto se retira igual.
+        vence = self.vence
+        base = vence.date() if vence else timezone.now().date()
+        fecha_lanzamiento = max(base, timezone.now().date()) + timedelta(days=1)
+
         producto = None
         if self.producto_publicado_id:
             producto = Products.objects.filter(id_product=self.producto_publicado_id).first()
@@ -259,6 +279,7 @@ class JuegoDetectado(models.Model):
                 calification=self.rating_conteo,
                 sobre_pedido=True,
                 radar_tienda=self.tienda,
+                fecha_lanzamiento=fecha_lanzamiento,
             )
         else:
             producto.title = self.titulo[:200]
@@ -266,6 +287,7 @@ class JuegoDetectado(models.Model):
             producto.image = self.imagen
             producto.sobre_pedido = True
             producto.radar_tienda = self.tienda
+            producto.fecha_lanzamiento = fecha_lanzamiento
             producto.save()
 
         producto.consola.add(consola)
@@ -278,6 +300,11 @@ class JuegoDetectado(models.Model):
         variante.precio = int(self.precio_venta)
         variante.precio_descuento = 0
         variante.stock = parametros.stock_publicacion
+        # Reserva con anticipo = precio total: el cliente paga el 100% hoy y no
+        # se le mandan credenciales hasta que exista la cuenta real.
+        variante.reserva_activa = True
+        variante.monto_reserva = int(self.precio_venta)
+        variante.cuotas_activas = False
         variante.save()
 
         self.producto_publicado_id = producto.id_product

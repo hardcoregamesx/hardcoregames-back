@@ -684,12 +684,13 @@ class PaymentInstallmentInline(admin.TabularInline):
 
 class PaymentPlanAdmin(admin.ModelAdmin):
     list_display = ('id', 'usuario_email', 'titulo_snapshot', 'tipo', 'estado', 'precio_total',
-                    'total_pagado', 'proximo_vencimiento', 'retirado')
+                    'total_pagado', 'cuenta_asignada', 'proximo_vencimiento', 'retirado')
     list_filter = ('tipo', 'estado', 'retirado')
     search_fields = ('user__email', 'titulo_snapshot', 'token')
     inlines = [PaymentInstallmentInline]
     readonly_fields = ('token', 'transaction_origen', 'saledetail', 'fecha_creacion', 'gamedetail')
-    actions = ['perdonar_mora', 'cancelar_plan', 'retirar_producto', 'reactivar_producto']
+    actions = ['entregar_reserva', 'perdonar_mora', 'cancelar_plan', 'retirar_producto',
+               'reactivar_producto']
 
     @admin.display(description='Usuario')
     def usuario_email(self, obj):
@@ -757,6 +758,82 @@ class PaymentPlanAdmin(admin.ModelAdmin):
     def retirar_producto(self, request, queryset):
         queryset.update(retirado=True, fecha_actualizacion=timezone.now())
         messages.success(request, "Producto(s) retirado(s). Se oculta la credencial en /purchases.")
+
+    @admin.action(description='Entregar pedido con la cuenta asignada (reservas)')
+    def entregar_reserva(self, request, queryset):
+        """Cierra un pedido de reserva: crea la venta y manda las credenciales.
+
+        Es el paso que faltaba de la fase 3 (docs/cuotas-y-reserva.md §2), y el
+        que usan los productos publicados por el radar de ofertas: el cliente
+        paga, el pedido queda en `esperando_stock` SIN cuenta -- porque el juego
+        todavia no se ha comprado -- y aqui se le asigna la cuenta real y se le
+        entrega.
+
+        Antes de entregar hay que elegir la cuenta en el campo "Cuenta asignada"
+        de cada plan. Nunca se inventa una cuenta: mandarle al cliente una
+        credencial que no funciona es peor que hacerlo esperar.
+        """
+        from products.views import build_div_html, send_email_notification
+
+        entregados, problemas = 0, []
+        for plan in queryset:
+            if plan.tipo != PaymentPlan.TIPO_RESERVA:
+                problemas.append('Plan #%s no es una reserva.' % plan.pk)
+                continue
+            if plan.cuenta_asignada is None:
+                problemas.append(
+                    'Plan #%s: falta elegir la cuenta. Abrelo, selecciona "Cuenta asignada" y guarda.'
+                    % plan.pk)
+                continue
+            if plan.saledetail_id:
+                problemas.append('Plan #%s ya fue entregado.' % plan.pk)
+                continue
+            if not plan.esta_completado():
+                # Con el radar el pago es del 100%, asi que esto solo pasa en
+                # reservas de verdad con saldo pendiente: se deja asignado.
+                plan.estado = PaymentPlan.ESTADO_ASIGNADO
+                plan.fecha_asignacion = timezone.now()
+                plan.fecha_actualizacion = timezone.now()
+                plan.save()
+                problemas.append(
+                    'Plan #%s: cuenta asignada, pero queda saldo por pagar. No se entrego.' % plan.pk)
+                continue
+
+            combinacion = plan.gamedetail
+            producto = combinacion.producto if combinacion else None
+            if producto is None:
+                problemas.append('Plan #%s: la variante ya no existe.' % plan.pk)
+                continue
+
+            venta = SaleDetail.objects.create(
+                usuario=plan.user,
+                producto=producto,
+                cuenta=plan.cuenta_asignada,
+                combinacion=combinacion,
+            )
+            plan.saledetail = venta
+            plan.cuenta_asignada = plan.cuenta_asignada
+            plan.fecha_asignacion = timezone.now()
+            plan.estado = PaymentPlan.ESTADO_COMPLETADO
+            plan.fecha_actualizacion = timezone.now()
+            plan.save()
+
+            try:
+                send_email_notification(
+                    plan.user_id,
+                    build_div_html(producto, combinacion, plan.cuenta_asignada, None),
+                )
+            except Exception as exc:
+                # La venta ya quedo registrada: el correo se puede reenviar,
+                # pero no se revierte la entrega por un fallo de SMTP.
+                problemas.append('Plan #%s entregado, pero fallo el correo: %s' % (plan.pk, exc))
+
+            entregados += 1
+
+        if entregados:
+            messages.success(request, '%s pedidos entregados con sus credenciales.' % entregados)
+        for aviso in problemas[:8]:
+            messages.warning(request, aviso)
 
     @admin.action(description='Reactivar producto retirado')
     def reactivar_producto(self, request, queryset):
