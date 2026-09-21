@@ -159,7 +159,8 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
     inlines = [PrecioRegionalInline]
     list_per_page = 50
     ordering = ['-rating_conteo', 'titulo']
-    actions = ['accion_publicar', 'accion_aprobar', 'accion_descartar', 'accion_despublicar']
+    actions = ['accion_publicar_todos', 'accion_publicar', 'accion_aprobar',
+               'accion_descartar', 'accion_despublicar']
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related('precios')
@@ -173,7 +174,7 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
         return format_html(
             '<b style="color:{}">{}</b>', colores.get(obj.estado, '#000'), obj.get_estado_display())
 
-    @admin.action(description='PUBLICAR en la tienda (pone los juegos a la venta)')
+    @admin.action(description='Publicar SOLO los seleccionados')
     def accion_publicar(self, request, queryset):
         """Publica en un solo paso.
 
@@ -198,6 +199,51 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
             self.message_user(
                 request, '%s juegos publicados y ya visibles en la landing.' % publicados,
                 messages.SUCCESS)
+        if sin_region:
+            self.message_user(
+                request, '%s sin region donde comprarlos: no se publicaron.' % sin_region,
+                messages.WARNING)
+        for mensaje in fallos[:5]:
+            self.message_user(request, mensaje, messages.ERROR)
+
+    @admin.action(description='PUBLICAR TODOS los que tengan precio (ignora la seleccion)')
+    def accion_publicar_todos(self, request, queryset):
+        """Publica todo lo que tenga precio, este seleccionado o no.
+
+        Poner el precio ya es la decision de vender: obligar a recorrer la lista
+        otra vez marcando casillas es trabajo repetido. Esta accion ignora la
+        seleccion a proposito y mira TODA la tabla, no solo la pagina visible.
+
+        No toca lo descartado ni lo vencido: eso se saco de circulacion a
+        proposito y volver a publicarlo seria justo lo contrario de lo pedido.
+        """
+        candidatos = (JuegoDetectado.objects
+                      .exclude(estado__in=['descartado', 'vencido'])
+                      .filter(Q(precio_venta__gt=0) | Q(precio_cuenta__gt=0))
+                      .prefetch_related('precios'))
+
+        parametros = ParametrosRadar.actuales()
+        publicados, sin_region, fallos = 0, 0, []
+        for juego in candidatos:
+            if not juego.preparar(parametros):
+                sin_region += 1
+                continue
+            try:
+                juego.publicar(parametros)
+                publicados += 1
+            except ValueError as exc:
+                fallos.append(str(exc))
+
+        if publicados:
+            self.message_user(
+                request,
+                '%s juegos con precio publicados y ya visibles en la landing.' % publicados,
+                messages.SUCCESS)
+        else:
+            self.message_user(
+                request,
+                'Ningun juego tenia precio. Escribe precios en las columnas y vuelve a intentarlo.',
+                messages.WARNING)
         if sin_region:
             self.message_user(
                 request, '%s sin region donde comprarlos: no se publicaron.' % sin_region,
