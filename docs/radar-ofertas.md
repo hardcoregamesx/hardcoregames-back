@@ -130,3 +130,13 @@ hace por titulo normalizado. Nunca correr `migrate` sin nombrar la app:
 ```bash
 docker exec hc-django python manage.py migrate radar
 ```
+
+## Despliegue
+
+```bash
+git -C /opt/hardcoregames/repos/django pull --ff-only
+bash /opt/hardcoregames/repos/django/deploy/deploy-radar-fase0.sh
+```
+
+El script es idempotente y deja la migracion aplicada, las tasas sembradas, la primera
+corrida hecha y el cron diario instalado. Rollback: `bash /root/deploy_hc.sh hc-django rollback`.
