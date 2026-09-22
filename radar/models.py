@@ -133,6 +133,14 @@ class MapeoConsola(models.Model):
         'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='+', help_text='Consola de tu catalogo. Vacia = ignorar esta plataforma.',
     )
+    # PC no se vende como cuenta primaria o secundaria: va con su propia
+    # licencia. Con esto, una plataforma puede saltarse las licencias normales.
+    licencia = models.ForeignKey(
+        'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+',
+        help_text='Licencia solo para esta plataforma. Se usa para PC, que no se vende como '
+                  'cuenta. Vacia = usar las licencias normales (codigo y cuenta).',
+    )
     activa = models.BooleanField(default=True)
 
     class Meta:
@@ -146,8 +154,9 @@ class MapeoConsola(models.Model):
 
     @classmethod
     def mapa(cls):
-        return {m.plataforma.lower(): m.consola
-                for m in cls.objects.filter(activa=True).select_related('consola')
+        """plataforma -> (consola, licencia_solo_de_esa_plataforma o None)."""
+        return {m.plataforma.lower(): (m.consola, m.licencia)
+                for m in cls.objects.filter(activa=True).select_related('consola', 'licencia')
                 if m.consola_id}
 
 
@@ -401,20 +410,26 @@ class JuegoDetectado(models.Model):
         plataforma esta mapeada, cae a la consola por defecto de la tienda.
         """
         if self.consola_id:
-            return [self.consola]
+            return [(self.consola, None)]
 
         parametros = parametros or ParametrosRadar.actuales()
         mapa = MapeoConsola.mapa()
         encontradas = []
+        vistas = set()
         for parte in (self.plataformas or '').split(','):
-            consola = mapa.get(parte.strip().lower())
-            if consola is not None and consola.pk not in [c.pk for c in encontradas]:
-                encontradas.append(consola)
+            par = mapa.get(parte.strip().lower())
+            if par is None:
+                continue
+            consola, licencia = par
+            if consola.pk in vistas:
+                continue
+            vistas.add(consola.pk)
+            encontradas.append((consola, licencia))
         if encontradas:
             return encontradas
 
         defecto = parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
-        return [defecto] if defecto else []
+        return [(defecto, None)] if defecto else []
 
     def preparar(self, parametros=None):
         """Deja el juego listo para publicar: region congelada y precios puestos.
@@ -477,14 +492,13 @@ class JuegoDetectado(models.Model):
                 '"%s" no tiene ningun precio. Ponle el de codigo, el de cuenta o los dos.'
                 % self.titulo)
 
-        consolas = self.consolas_publicacion(parametros)
-        if not consolas:
+        destinos = self.consolas_publicacion(parametros)
+        if not destinos:
             raise ValueError(
                 'Falta decir a que consola corresponden las plataformas de %s ("%s"). '
                 'Configuralo en Consolas por plataforma, o pon una consola por defecto en '
                 'Parametros del radar.' % (self.get_tienda_display(), self.plataformas or '?')
             )
-        consola = consolas[0]
 
         licencia = self.licencia or parametros.licencia_default
         if licencia is None:
@@ -525,8 +539,8 @@ class JuegoDetectado(models.Model):
             producto.fecha_lanzamiento = fecha_lanzamiento
             producto.save()
 
-        for c in consolas:
-            producto.consola.add(c)
+        for cons, _ in destinos:
+            producto.consola.add(cons)
 
         def _variante(lic, precio, cons):
             v = GameDetail.objects.filter(
@@ -547,7 +561,13 @@ class JuegoDetectado(models.Model):
 
         # Cada precio vacio es una decision: "esta modalidad no la ofrezco".
         # Se crea una variante por cada consola en la que sale el juego.
-        for cons in consolas:
+        for cons, licencia_propia in destinos:
+            if licencia_propia is not None:
+                # Plataforma con licencia propia (el caso de PC, que no se
+                # vende como cuenta): una sola variante, al precio de codigo.
+                if self.precio_venta:
+                    _variante(licencia_propia, self.precio_venta, cons)
+                continue
             if self.precio_venta:
                 _variante(licencia, self.precio_venta, cons)
             if self.precio_cuenta:

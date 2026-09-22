@@ -48,8 +48,8 @@ class ParametrosRadarAdmin(admin.ModelAdmin):
 
 @admin.register(MapeoConsola)
 class MapeoConsolaAdmin(admin.ModelAdmin):
-    list_display = ['plataforma', 'consola', 'activa']
-    list_editable = ['consola', 'activa']
+    list_display = ['plataforma', 'consola', 'licencia', 'activa']
+    list_editable = ['consola', 'licencia', 'activa']
 
     def has_add_permission(self, request):
         # Las plataformas las define la tienda, no se inventan aqui. Aparecen
@@ -165,7 +165,7 @@ class PrecioRegionalInline(admin.TabularInline):
 class JuegoDetectadoAdmin(admin.ModelAdmin):
     list_display = [
         'titulo', 'tienda', 'col_estado', 'col_precio_co', 'col_mejor', 'col_costo',
-        'col_venta', 'precio_venta', 'precio_cuenta', 'col_margen', 'col_vence', 'col_popularidad',
+        'plataformas', 'col_venta', 'precio_venta', 'precio_cuenta', 'col_margen', 'col_vence', 'col_popularidad',
         'col_catalogo',
     ]
     list_editable = ['precio_venta', 'precio_cuenta']

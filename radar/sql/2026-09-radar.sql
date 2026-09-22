@@ -168,8 +168,14 @@ CREATE TABLE IF NOT EXISTS radar_mapeoconsola (
   id serial PRIMARY KEY,
   plataforma varchar(40) NOT NULL UNIQUE,
   consola_id integer NULL,
+  -- PC no se vende como cuenta: va con su propia licencia. Vacio = usar las
+  -- licencias normales (codigo y cuenta).
+  licencia_id integer NULL,
   activa boolean NOT NULL DEFAULT true
 );
+
+ALTER TABLE radar_mapeoconsola
+  ADD COLUMN IF NOT EXISTS licencia_id integer NULL;
 
 INSERT INTO radar_mapeoconsola (plataforma) VALUES
   ('XboxOne'), ('XboxSeriesX'), ('PC'), ('Handheld'),
