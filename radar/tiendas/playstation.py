@@ -20,6 +20,7 @@ Ver docs/radar-ofertas.md.
 import json
 import re
 import time
+from collections import Counter
 from datetime import datetime, timezone as tz_utc
 from decimal import Decimal, InvalidOperation
 
@@ -38,6 +39,21 @@ REGIONES = {
     'CO': 'es-CO',
     'US': 'en-US',
     'TR': 'tr-TR',
+}
+
+# Que cuenta como "un juego". La rejilla de ofertas mezcla juegos con DLC,
+# pases de temporada, monedas virtuales, skins y mapas -- mas de un tercio del
+# listado. Dos motivos para filtrarlos: no son lo que se vende, y al cruzar por
+# titulo un DLC turco barato podia emparejarse con el juego completo
+# colombiano, inventando un margen que no existe.
+#
+# Sony devuelve esta etiqueta TRADUCIDA por mercado, asi que hay una lista por
+# idioma. Si aparece una etiqueta nueva, el juego se omite y se avisa: es mas
+# seguro perder una oferta que publicar un DLC como si fuera el juego.
+CLASES_JUEGO = {
+    'es-CO': {'Juego completo', 'Paquete de juego', 'Edicion premium', 'Edición premium'},
+    'en-US': {'Full Game', 'Game Bundle', 'Premium Edition'},
+    'tr-TR': {'Tam Sürüm Oyun', 'Oyun Paketi', 'Premium Sürüm'},
 }
 
 USER_AGENT = 'HardcoreGamesRadar/1.0 (+https://www.hardcoregames.co)'
@@ -150,6 +166,7 @@ def ofertas(region, sesion=None, log=None, tope=8000):
     sesion = sesion or _sesion()
 
     encontradas, offset = [], 0
+    descartadas = Counter()
     while offset < tope:
         datos = _pedir(
             sesion, locale, 'categoryGridRetrieve', HASH_GRID,
@@ -162,7 +179,12 @@ def ofertas(region, sesion=None, log=None, tope=8000):
         if not lote:
             break
 
+        permitidas = CLASES_JUEGO.get(locale, set())
         for prod in lote:
+            clase = prod.get('localizedStoreDisplayClassification') or ''
+            if permitidas and clase not in permitidas:
+                descartadas[clase] += 1
+                continue
             precio = prod.get('price') or {}
             lista, moneda = _parsear_precio(precio.get('basePrice'))
             oferta, _ = _parsear_precio(precio.get('discountedPrice'))
@@ -171,6 +193,7 @@ def ofertas(region, sesion=None, log=None, tope=8000):
             descuento = re.sub(r'[^0-9]', '', precio.get('discountText') or '') or '0'
             encontradas.append({
                 'id_externo': prod.get('id'),
+                'clase': clase,
                 'titulo': (prod.get('name') or '')[:300],
                 'titulo_normalizado': normalizar_titulo(prod.get('name')),
                 'imagen': _imagen(prod),
@@ -187,7 +210,8 @@ def ofertas(region, sesion=None, log=None, tope=8000):
         offset += PAGINA
 
     if log:
-        log('  %s: %s ofertas' % (region, len(encontradas)))
+        log('  %s: %s juegos (descartados %s DLC, pases y similares)'
+            % (region, len(encontradas), sum(descartadas.values())))
     return encontradas
 
 

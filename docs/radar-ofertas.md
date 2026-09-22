@@ -156,6 +156,17 @@ Sony **no tiene identificador global**: el SKU cambia por zona. Eso manda en el 
 - El 30% que no cruza son, casi siempre, juegos que Colombia no tiene en oferta. Sin precio
   de referencia no hay margen que calcular, asi que se omiten.
 
+**Solo se miran juegos.** La rejilla de ofertas mezcla juegos con DLC, pases de temporada,
+monedas virtuales, skins y mapas: mas de un tercio del listado. Se filtran por dos motivos,
+y el segundo es el importante: al cruzar por titulo, un DLC turco barato podia emparejarse
+con el juego completo colombiano e inventar un margen que no existe. Se vio en la primera
+prueba ("Flight Simulator Standard to Deluxe" con 78.000 de margen fantasma).
+
+Sony devuelve esa etiqueta **traducida por mercado**, asi que hay una lista por idioma en
+`CLASES_JUEGO`. Lo que cuenta como juego: *Juego completo*, *Paquete de juego* y *Edicion
+premium* (y sus equivalentes en ingles y turco). Si aparece una etiqueta nueva, el producto
+se omite: es mas seguro perder una oferta que publicar un DLC como si fuera el juego.
+
 La tienda colombiana de PS **cotiza en dolares**, no en pesos. El precio de referencia se
 pasa a pesos con el dolar de mercado (lo que pagaria el cliente comprando el solo), mientras
 que el costo usa el dolar de saldo de PSN, que es mas barato.
