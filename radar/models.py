@@ -113,6 +113,44 @@ class ParametrosRadar(models.Model):
         return obj
 
 
+class MapeoConsola(models.Model):
+    """Que consola del catalogo corresponde a cada plataforma de la tienda.
+
+    Un juego casi nunca sale en una sola consola: 76 de cada 100 ofertas de
+    Xbox vienen como "XboxOne, XboxSeriesX". Publicar con una consola fija
+    perdia esa informacion y dejaba el producto mal etiquetado.
+
+    Las plataformas que llegan hoy de Xbox son XboxOne, XboxSeriesX, PC y
+    Handheld. Dejar la consola vacia es la forma de decir "esta plataforma no
+    me interesa": PC y Handheld normalmente se ignoran.
+    """
+
+    plataforma = models.CharField(
+        max_length=40, unique=True,
+        help_text='Nombre tal como lo manda la tienda. Ej: XboxOne, XboxSeriesX, PS5.',
+    )
+    consola = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text='Consola de tu catalogo. Vacia = ignorar esta plataforma.',
+    )
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        managed = False
+        verbose_name = 'un mapeo de consola'
+        verbose_name_plural = 'Consolas por plataforma'
+        ordering = ['plataforma']
+
+    def __str__(self):
+        return '%s -> %s' % (self.plataforma, self.consola or 'sin asignar')
+
+    @classmethod
+    def mapa(cls):
+        return {m.plataforma.lower(): m.consola
+                for m in cls.objects.filter(activa=True).select_related('consola')
+                if m.consola_id}
+
+
 class Franquicia(models.Model):
     """Nombres que valen la pena mirar, aunque el numero no lo diga.
 
@@ -352,6 +390,32 @@ class JuegoDetectado(models.Model):
         elegido = elegido or self.mejor_precio()
         return elegido.fecha_fin if elegido else None
 
+    def consolas_publicacion(self, parametros=None):
+        """Las consolas del catalogo en las que sale este juego.
+
+        Un juego casi nunca sale en una sola: la tienda manda "XboxOne,
+        XboxSeriesX" y hay que publicarlo en las dos, o el producto queda mal
+        etiquetado y el cliente no lo encuentra filtrando por su consola.
+
+        Si el juego tiene consola elegida a mano, manda esa. Si ninguna
+        plataforma esta mapeada, cae a la consola por defecto de la tienda.
+        """
+        if self.consola_id:
+            return [self.consola]
+
+        parametros = parametros or ParametrosRadar.actuales()
+        mapa = MapeoConsola.mapa()
+        encontradas = []
+        for parte in (self.plataformas or '').split(','):
+            consola = mapa.get(parte.strip().lower())
+            if consola is not None and consola.pk not in [c.pk for c in encontradas]:
+                encontradas.append(consola)
+        if encontradas:
+            return encontradas
+
+        defecto = parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
+        return [defecto] if defecto else []
+
     def preparar(self, parametros=None):
         """Deja el juego listo para publicar: region congelada y precios puestos.
 
@@ -413,14 +477,14 @@ class JuegoDetectado(models.Model):
                 '"%s" no tiene ningun precio. Ponle el de codigo, el de cuenta o los dos.'
                 % self.titulo)
 
-        consola = self.consola or (
-            parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
-        )
-        if consola is None:
+        consolas = self.consolas_publicacion(parametros)
+        if not consolas:
             raise ValueError(
-                'Falta la consola por defecto para %s. Configurala en Parametros del radar.'
-                % self.get_tienda_display()
+                'Falta decir a que consola corresponden las plataformas de %s ("%s"). '
+                'Configuralo en Consolas por plataforma, o pon una consola por defecto en '
+                'Parametros del radar.' % (self.get_tienda_display(), self.plataformas or '?')
             )
+        consola = consolas[0]
 
         licencia = self.licencia or parametros.licencia_default
         if licencia is None:
@@ -461,14 +525,15 @@ class JuegoDetectado(models.Model):
             producto.fecha_lanzamiento = fecha_lanzamiento
             producto.save()
 
-        producto.consola.add(consola)
+        for c in consolas:
+            producto.consola.add(c)
 
-        def _variante(lic, precio):
+        def _variante(lic, precio, cons):
             v = GameDetail.objects.filter(
-                producto=producto, consola=consola, licencia=lic,
+                producto=producto, consola=cons, licencia=lic,
             ).first()
             if v is None:
-                v = GameDetail(producto=producto, consola=consola, licencia=lic)
+                v = GameDetail(producto=producto, consola=cons, licencia=lic)
             v.precio = int(precio)
             v.precio_descuento = 0
             v.stock = parametros.stock_publicacion
@@ -481,13 +546,14 @@ class JuegoDetectado(models.Model):
             return v
 
         # Cada precio vacio es una decision: "esta modalidad no la ofrezco".
-        if self.precio_venta:
-            _variante(licencia, self.precio_venta)
-
-        if self.precio_cuenta:
-            for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
-                if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
-                    _variante(lic, self.precio_cuenta)
+        # Se crea una variante por cada consola en la que sale el juego.
+        for cons in consolas:
+            if self.precio_venta:
+                _variante(licencia, self.precio_venta, cons)
+            if self.precio_cuenta:
+                for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
+                    if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
+                        _variante(lic, self.precio_cuenta, cons)
 
         self.producto_publicado_id = producto.id_product
         self.publicado_en = timezone.now()

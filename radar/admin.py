@@ -16,6 +16,7 @@ from django.utils.html import format_html
 from radar.models import (
     EjecucionRadar,
     Franquicia,
+    MapeoConsola,
     JuegoDetectado,
     ParametrosRadar,
     PrecioRegional,
@@ -42,6 +43,17 @@ class ParametrosRadarAdmin(admin.ModelAdmin):
         return not ParametrosRadar.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MapeoConsola)
+class MapeoConsolaAdmin(admin.ModelAdmin):
+    list_display = ['plataforma', 'consola', 'activa']
+    list_editable = ['consola', 'activa']
+
+    def has_add_permission(self, request):
+        # Las plataformas las define la tienda, no se inventan aqui. Aparecen
+        # solas cuando el radar encuentra una nueva.
         return False
 
 

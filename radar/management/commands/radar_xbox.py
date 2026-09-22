@@ -20,6 +20,7 @@ from radar.models import (
     REGION_REFERENCIA,
     EjecucionRadar,
     JuegoDetectado,
+    MapeoConsola,
     ParametrosRadar,
     PrecioRegional,
     TasaCambio,
@@ -195,6 +196,16 @@ class Command(BaseCommand):
                 'Sin tasa de cambio para: %s. Esos costos quedan sin convertir. '
                 'Corre primero: manage.py radar_tasas' % ', '.join(faltantes)
             ))
+
+        # Si la tienda estrena una plataforma, que aparezca sola en el admin
+        # para poder asignarle consola. Mejor eso que descubrirlo por un juego
+        # que no se publica.
+        vistas = {parte.strip() for f in fichas.values()
+                  for parte in (f.get('plataformas') or '').split(',') if parte.strip()}
+        conocidas = set(MapeoConsola.objects.values_list('plataforma', flat=True))
+        for nueva in sorted(vistas - conocidas):
+            MapeoConsola.objects.create(plataforma=nueva)
+            self.stdout.write('  plataforma nueva detectada: %s (asignale consola en el admin)' % nueva)
 
         catalogo = self._catalogo_propio()
         guardados = 0

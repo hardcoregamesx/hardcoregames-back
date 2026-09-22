@@ -158,6 +158,24 @@ CREATE INDEX IF NOT EXISTS products_products_sobre_pedido_idx
 -- resenas no lo diga. El radar trae cientos de ofertas por ciclo y la mayoria
 -- son juegos que nadie pide; esto es el criterio del dueno, editable a mano.
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- Que consola del catalogo corresponde a cada plataforma de la tienda. Un juego
+-- casi nunca sale en una sola: 76 de cada 100 ofertas de Xbox vienen como
+-- "XboxOne, XboxSeriesX". Se siembra la lista de plataformas SIN asignar: los
+-- ids de consola son de cada instalacion y se eligen desde el admin.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS radar_mapeoconsola (
+  id serial PRIMARY KEY,
+  plataforma varchar(40) NOT NULL UNIQUE,
+  consola_id integer NULL,
+  activa boolean NOT NULL DEFAULT true
+);
+
+INSERT INTO radar_mapeoconsola (plataforma) VALUES
+  ('XboxOne'), ('XboxSeriesX'), ('PC'), ('Handheld'),
+  ('PS4'), ('PS5')
+ON CONFLICT (plataforma) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS radar_franquicia (
   id serial PRIMARY KEY,
   termino varchar(80) NOT NULL UNIQUE,
