@@ -222,6 +222,26 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
         for mensaje in fallos[:5]:
             self.message_user(request, mensaje, messages.ERROR)
 
+    def save_model(self, request, obj, form, change):
+        """Si el juego ya esta publicado, cambiar su precio actualiza la tienda.
+
+        Antes guardar solo cambiaba el numero en el radar: el producto seguia a
+        la venta al precio viejo hasta volver a pulsar el boton de publicar.
+        Eso deja creyendo que se cambio un precio cuando no.
+
+        Aqui no aplica el motivo por el que publicar es una accion aparte: el
+        producto YA esta a la venta, asi que sincronizar no pone nada nuevo en
+        la tienda, solo corrige lo que ya estaba.
+        """
+        super().save_model(request, obj, form, change)
+        if not change or obj.estado != 'publicado' or not obj.producto_publicado_id:
+            return
+        try:
+            obj.publicar()
+        except ValueError as exc:
+            self.message_user(
+                request, '%s: %s' % (obj.titulo, exc), messages.ERROR)
+
     def get_urls(self):
         """Una URL propia para el boton de publicar todos.
 
