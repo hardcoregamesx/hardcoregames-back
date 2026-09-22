@@ -34,7 +34,8 @@ def _pesos(valor):
 @admin.register(ParametrosRadar)
 class ParametrosRadarAdmin(admin.ModelAdmin):
     list_display = ['__str__', 'factor_precio_venta', 'margen_minimo_cop', 'descuento_minimo_pct',
-                    'consola_xbox', 'consola_ps', 'licencia_default',
+                    'consola_xbox', 'consola_ps', 'consola_xbox_ambas', 'consola_ps_ambas',
+                    'licencia_default',
                     'licencia_primaria', 'licencia_secundaria', 'factor_cuenta',
                     'tipo_producto', 'stock_publicacion', 'actualizado']
 

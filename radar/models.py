@@ -62,6 +62,22 @@ class ParametrosRadar(models.Model):
         'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='+', help_text='Consola que se asigna a los juegos de PlayStation al publicarlos.',
     )
+    # Un juego que sale en las dos generaciones se vende con UNA cuenta que
+    # sirve en las dos. Publicar una variante por generacion obliga al cliente
+    # a elegir consola cuando no hay nada que elegir, y duplica el selector.
+    consola_xbox_ambas = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name='Consola Xbox (ambas generaciones)',
+        help_text='Se usa cuando el juego sale en Xbox One y Xbox Series a la vez, en vez de '
+                  'publicarlo en las dos por separado. Vacia = se busca sola una consola '
+                  'llamada "Xbox".',
+    )
+    consola_ps_ambas = models.ForeignKey(
+        'products.Consoles', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name='Consola PlayStation (ambas generaciones)',
+        help_text='Igual que la anterior, para PS4 + PS5. Vacia = se publica en las dos por '
+                  'separado, porque no hay una consola "PlayStation" generica en el catalogo.',
+    )
     licencia_default = models.ForeignKey(
         'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='+',
@@ -113,6 +129,24 @@ class ParametrosRadar(models.Model):
         if obj is None:
             obj = cls.objects.create()
         return obj
+
+    def consola_ambas(self, tienda):
+        """La consola que cubre las dos generaciones de una familia.
+
+        Si no esta configurada se busca por nombre: el catalogo ya tiene una
+        consola "Xbox" sin generacion, y el resto del proyecto la localiza
+        asi (products/views.py, managePriceFile.py). En PlayStation no existe
+        equivalente, asi que sin configurar se publica en PS4 y PS5 aparte.
+        """
+        from products.models import Consoles
+
+        if tienda == 'XBOX':
+            if self.consola_xbox_ambas_id:
+                return self.consola_xbox_ambas
+            if not hasattr(self, '_xbox_generica'):
+                self._xbox_generica = Consoles.objects.filter(descripcion__iexact='xbox').first()
+            return self._xbox_generica
+        return self.consola_ps_ambas if self.consola_ps_ambas_id else None
 
 
 class MapeoConsola(models.Model):
@@ -403,12 +437,22 @@ class JuegoDetectado(models.Model):
         elegido = elegido or self.mejor_precio()
         return elegido.fecha_fin if elegido else None
 
-    def consolas_publicacion(self, parametros=None):
+    def consolas_publicacion(self, parametros=None, colapsar=True):
         """Las consolas del catalogo en las que sale este juego.
 
         Un juego casi nunca sale en una sola: la tienda manda "XboxOne,
         XboxSeriesX" y hay que publicarlo en las dos, o el producto queda mal
         etiquetado y el cliente no lo encuentra filtrando por su consola.
+
+        Pero cuando sale en las DOS generaciones de una familia, la cuenta es
+        una sola y sirve en las dos: ahi se colapsa en una consola generica
+        ("Xbox"). Sin eso el cliente veia cuatro variantes al mismo precio --
+        primaria y secundaria de Xbox One, primaria y secundaria de Series --
+        y parecia que estaba eligiendo algo.
+
+        `colapsar=False` devuelve las consolas sin agrupar, que es lo que se
+        guarda en el producto para que el filtro del catalogo lo encuentre por
+        cualquiera de las dos generaciones.
 
         Si el juego tiene consola elegida a mano, manda esa. Si ninguna
         plataforma esta mapeada, cae a la consola por defecto de la tienda.
@@ -418,10 +462,33 @@ class JuegoDetectado(models.Model):
 
         parametros = parametros or ParametrosRadar.actuales()
         mapa = MapeoConsola.mapa()
+        partes = [p.strip().lower() for p in (self.plataformas or '').split(',') if p.strip()]
+
+        # Si sale en las dos generaciones de una familia, una sola consola que
+        # las cubre: es la misma cuenta y funciona en las dos. Cuatro variantes
+        # -- primaria y secundaria de cada generacion -- al mismo precio hacen
+        # que el cliente crea que esta eligiendo algo.
         encontradas = []
         vistas = set()
-        for parte in (self.plataformas or '').split(','):
-            par = mapa.get(parte.strip().lower())
+        consumidas = set()
+        familias = ()
+        if colapsar:
+            familias = (
+                (('xboxone', 'xboxseriesx'), parametros.consola_ambas('XBOX')),
+                (('ps4', 'ps5'), parametros.consola_ambas('PS')),
+            )
+        for miembros, consola in familias:
+            if consola is None or not all(m in partes for m in miembros):
+                continue
+            consumidas.update(miembros)
+            if consola.pk not in vistas:
+                vistas.add(consola.pk)
+                encontradas.append((consola, None))
+
+        for parte in partes:
+            if parte in consumidas:
+                continue
+            par = mapa.get(parte)
             if par is None:
                 continue
             consola, licencia = par
@@ -629,8 +696,14 @@ class JuegoDetectado(models.Model):
             producto.fecha_lanzamiento = fecha_lanzamiento
             producto.save()
 
-        for cons, _ in destinos:
-            producto.consola.add(cons)
+        # Las consolas del producto NO son las de las variantes. La variante
+        # colapsada dice "Xbox" -- una sola opcion para el cliente, porque la
+        # cuenta sirve en las dos --, pero el filtro del catalogo busca por
+        # esta lista: si solo guardara la generica, quien filtra por Xbox One
+        # no encontraria el juego. Asi el badge del titulo tambien queda
+        # diciendo la verdad: "Xbox Series / Xbox One".
+        etiquetas = self.consolas_publicacion(parametros, colapsar=False) or destinos
+        producto.consola.set([cons for cons, _ in etiquetas])
 
         def _variante(lic, precio, cons):
             v = GameDetail.objects.filter(
