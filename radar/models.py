@@ -137,9 +137,11 @@ class MapeoConsola(models.Model):
     # licencia. Con esto, una plataforma puede saltarse las licencias normales.
     licencia = models.ForeignKey(
         'products.Licenses', null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='+',
-        help_text='Licencia solo para esta plataforma. Se usa para PC, que no se vende como '
-                  'cuenta. Vacia = usar las licencias normales (codigo y cuenta).',
+        related_name='+', verbose_name='Licencia exclusiva (solo PC)',
+        help_text='DEJAR VACIA en Xbox y PlayStation. Vacia = el juego se publica con las '
+                  'licencias normales: codigo y cuenta (primaria y secundaria). Llenarla '
+                  'significa "esta plataforma se vende UNICAMENTE con esta licencia y solo al '
+                  'precio de codigo", que es el caso de PC, que no se vende como cuenta.',
     )
     activa = models.BooleanField(default=True)
 
@@ -479,9 +481,11 @@ class JuegoDetectado(models.Model):
                     'primaria ni secundaria. Sin ellas no hay nada que publicar: '
                     'configuralas, o ponle tambien precio de codigo.')
             return (
-                'Solo tiene precio de cuenta, pero las plataformas en las que sale ("%s") se '
-                'venden con licencia propia, que no admite cuentas. Ponle precio de codigo.'
-                % (self.plataformas or '?'))
+                'Solo tiene precio de cuenta, pero sus plataformas ("%s") tienen una licencia '
+                'exclusiva asignada en Consolas por plataforma, y esa modalidad solo usa el '
+                'precio de codigo. Si Xbox o PlayStation salieron en esa lista, lo que hay que '
+                'hacer es DEJAR VACIA esa columna (vacia = codigo y cuenta normales); la '
+                'licencia exclusiva es solo para PC.' % (self.plataformas or '?'))
         return (
             'La configuracion actual no produce ninguna variante (%s consola(s), licencia '
             'por defecto %s). Revisa las licencias en Parametros del radar.'
