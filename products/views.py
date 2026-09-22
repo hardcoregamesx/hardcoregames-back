@@ -997,7 +997,14 @@ def apply_coupon_points(coupon_code, id_user, order_id):
     """
     if not coupon_code:
         return
-    coupon = Coupon.objects.filter(name_coupon=coupon_code).first()
+    # La busqueda es insensible a mayusculas por la misma razon que arriba no
+    # se filtra por is_valid: el checkout valida con name_coupon__iexact (ver
+    # _calculate_cart_amount), asi que un cliente que escriba "juegapc" en vez
+    # de "JUEGAPC" completa la compra con el cupon aplicado. Si aqui exigimos
+    # el mismo caso exacto, esa compra no deja CouponRedemption: el canje no
+    # cuenta contra los limites de uso y el pedido desaparece de la cola de
+    # entrega, en silencio y sin error visible.
+    coupon = Coupon.objects.filter(name_coupon__iexact=coupon_code).first()
     if not coupon:
         return
     instance_user = User.objects.filter(pk=id_user).first()
