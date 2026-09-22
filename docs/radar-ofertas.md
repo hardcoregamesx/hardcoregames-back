@@ -61,12 +61,53 @@ docker exec hc-django python manage.py radar_reporte --min-resenas 20   # solo l
 
 `radar_xbox --dry-run` consulta las tiendas y muestra el resumen sin escribir en la base.
 
+```bash
+# Revisar que lo publicado de verdad se pueda comprar.
+docker exec hc-django python manage.py radar_revisar
+docker exec hc-django python manage.py radar_revisar --reparar
+```
+
 ### Cron sugerido
 
 ```
 0 6 * * *  docker exec hc-django python manage.py radar_tasas  >> /opt/hardcoregames/radar.log 2>&1
 15 6 * * * docker exec hc-django python manage.py radar_xbox   >> /opt/hardcoregames/radar.log 2>&1
 ```
+
+## Publicado no es lo mismo que comprable
+
+Un juego publicado vive en dos sitios, y cada uno saca el precio de un lado
+distinto:
+
+- la **landing** lo saca de la tabla del radar (`precio_venta` / `precio_cuenta`);
+- la **ficha del producto** lo saca de las variantes del catalogo
+  (`products_gamedetail`), y el frontend solo mira las que tienen stock y precio
+  mayores que cero.
+
+Cuando el producto no tiene ninguna variante asi, la ficha cae al modo de
+producto fisico: **precio $0 y boton de "solicitar orden de compra", sin
+checkout**. La tarjeta de la landing, mientras tanto, sigue mostrando un precio
+normal. Es el peor reparto posible: parece que todo funciona hasta que un
+cliente hace clic.
+
+Se llegaba a ese estado por un hueco en la publicacion: un juego con **solo
+precio de cuenta** y con las licencias primaria/secundaria **sin configurar** en
+*Parametros del radar* no generaba ni una variante, y aun asi quedaba
+`publicado`. Tres cambios lo cierran:
+
+1. `publicar()` calcula las variantes **antes** de tocar el catalogo y falla con
+   un mensaje que dice que falta configurar, en vez de crear un producto vacio.
+   Tambien rechaza un `stock_publicacion` en 0, que deja la ficha igual de
+   muerta.
+2. `/products/locura` exige que exista al menos una variante con stock y precio,
+   asi que una ficha muerta ya no puede salir en la landing.
+3. La lista del admin trae una columna **En venta** con el estado real de cada
+   publicado, y `radar_revisar` encuentra y arregla los que quedaron de antes.
+
+`radar_revisar` no toca los juegos con la promocion ya vencida: ahi las
+variantes estan en stock 0 a proposito (lo hace `radar_vencer`), y
+republicarlos los volveria a poner a la venta al precio de una oferta que ya no
+existe.
 
 ## El dolar de saldo no es el dolar de mercado
 

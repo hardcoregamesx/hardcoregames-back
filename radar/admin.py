@@ -8,7 +8,7 @@ calma. "Publicar" ya crea el producto real y lo pone a la venta.
 from collections import Counter
 
 from django.contrib import admin, messages
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import redirect
 from django.urls import path, reverse
 from django.utils.html import format_html
@@ -166,7 +166,7 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
     list_display = [
         'titulo', 'tienda', 'col_estado', 'col_precio_co', 'col_mejor', 'col_costo',
         'plataformas', 'col_venta', 'precio_venta', 'precio_cuenta', 'col_margen', 'col_vence', 'col_popularidad',
-        'col_catalogo',
+        'col_catalogo', 'col_comprable',
     ]
     list_editable = ['precio_venta', 'precio_cuenta']
     list_filter = [RelevanciaFilter, 'estado', 'tienda', 'comprable_co', 'visto_ultimo']
@@ -179,7 +179,34 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
                'accion_descartar', 'accion_despublicar']
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related('precios')
+        # Se anota si el producto publicado tiene alguna variante comprable.
+        # No hay ForeignKey hacia products a proposito (ver la cabecera de
+        # models.py), pero para un EXISTS no hace falta: las dos tablas viven
+        # en la misma base.
+        from products.models import GameDetail
+
+        comprable = GameDetail.objects.filter(
+            producto_id=OuterRef('producto_publicado_id'), stock__gt=0, precio__gt=0)
+        return (super().get_queryset(request)
+                .prefetch_related('precios')
+                .annotate(_comprable=Exists(comprable)))
+
+    @admin.display(description='En venta')
+    def col_comprable(self, obj):
+        """Si un cliente puede pagarlo hoy.
+
+        Un publicado sin variantes sale en la landing pero su ficha aparece en
+        $0 y sin checkout, y desde el admin no habia forma de notarlo. Esta
+        columna lo hace visible donde se trabaja.
+        """
+        if obj.estado != 'publicado':
+            return ''
+        if getattr(obj, '_comprable', False):
+            return format_html('<span style="color:#27ae60">si</span>')
+        return format_html(
+            '<b style="color:#c0392b" title="El producto existe pero no tiene ninguna '
+            'variante con precio y stock: la ficha sale en $0. Corre '
+            'radar_revisar --reparar">NO</b>')
 
     @admin.display(description='Estado')
     def col_estado(self, obj):

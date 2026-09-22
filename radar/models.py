@@ -459,6 +459,48 @@ class JuegoDetectado(models.Model):
             self.save(update_fields=cambios)
         return True
 
+    def _motivo_sin_variantes(self, parametros, destinos):
+        """Por que esta configuracion no genera ninguna variante vendible.
+
+        Esto no era un error hasta que se vio en la tienda: un juego con solo
+        precio de cuenta, con las licencias primaria/secundaria sin configurar,
+        se publicaba "bien" y creaba un producto sin una sola variante. La
+        landing lo mostraba con precio (lo saca de la tabla del radar), pero la
+        ficha lo mostraba en $0 y con el boton de "solicitar orden de compra":
+        el frontend cae a ese modo cuando no encuentra ninguna variante con
+        stock y precio. Un producto que no se puede comprar es peor que uno que
+        no se publico, asi que ahora se avisa aqui, con el nombre de lo que
+        falta configurar.
+        """
+        if self.precio_cuenta and not self.precio_venta:
+            if parametros.licencia_primaria is None and parametros.licencia_secundaria is None:
+                return (
+                    '"%s" solo tiene precio de cuenta, y en Parametros del radar no hay '
+                    'licencia primaria ni secundaria. Sin ellas no hay nada que publicar: '
+                    'configuralas, o ponle tambien precio de codigo.' % self.titulo)
+            return (
+                '"%s" solo tiene precio de cuenta, pero las plataformas en las que sale '
+                '("%s") se venden con licencia propia, que no admite cuentas. Ponle precio '
+                'de codigo.' % (self.titulo, self.plataformas or '?'))
+        return (
+            'La configuracion actual no produce ninguna variante para "%s" (%s consola(s), '
+            'licencia por defecto %s). Revisa las licencias en Parametros del radar.'
+            % (self.titulo, len(destinos), parametros.licencia_default or 'sin configurar'))
+
+    def variantes_vendibles(self):
+        """Cuantas variantes de este juego puede comprar un cliente hoy.
+
+        Mismo criterio que usa la ficha del producto (stock y precio mayores
+        que cero). Cero significa que el producto esta en la tienda pero no se
+        puede comprar.
+        """
+        from products.models import GameDetail
+
+        if not self.producto_publicado_id:
+            return 0
+        return GameDetail.objects.filter(
+            producto_id=self.producto_publicado_id, stock__gt=0, precio__gt=0).count()
+
     def publicar(self, parametros=None):
         """Crea (o actualiza) el producto real del catalogo para este juego.
 
@@ -506,6 +548,36 @@ class JuegoDetectado(models.Model):
 
         if parametros.tipo_producto is None:
             raise ValueError('Falta el tipo de producto por defecto. Configuralo en Parametros del radar.')
+
+        # Con stock 0 la variante existe pero la ficha la ignora: el frontend
+        # solo mira las variantes con stock y precio, y sin ninguna cae al modo
+        # "producto fisico" -- precio $0 y boton de "solicitar orden de compra".
+        if parametros.stock_publicacion < 1:
+            raise ValueError(
+                'El stock de publicacion esta en %s. Con 0 el producto sale sin precio y sin '
+                'boton de compra. Ponlo en al menos 1 en Parametros del radar.'
+                % parametros.stock_publicacion)
+
+        # Que variantes hay que crear. Se calcula ANTES de tocar el catalogo: si
+        # la configuracion no produce ninguna, crear el producto solo deja una
+        # ficha muerta en la tienda (ver _motivo_sin_variantes).
+        plan = []
+        for cons, licencia_propia in destinos:
+            if licencia_propia is not None:
+                # Plataforma con licencia propia (el caso de PC, que no se
+                # vende como cuenta): una sola variante, al precio de codigo.
+                if self.precio_venta:
+                    plan.append((licencia_propia, self.precio_venta, cons))
+                continue
+            if self.precio_venta:
+                plan.append((licencia, self.precio_venta, cons))
+            if self.precio_cuenta:
+                for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
+                    if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
+                        plan.append((lic, self.precio_cuenta, cons))
+
+        if not plan:
+            raise ValueError(self._motivo_sin_variantes(parametros, destinos))
 
         # El modo reserva exige una fecha de lanzamiento futura. Se usa el dia
         # siguiente al fin de la promocion: mientras el producto este publicado
@@ -560,20 +632,15 @@ class JuegoDetectado(models.Model):
             return v
 
         # Cada precio vacio es una decision: "esta modalidad no la ofrezco".
-        # Se crea una variante por cada consola en la que sale el juego.
-        for cons, licencia_propia in destinos:
-            if licencia_propia is not None:
-                # Plataforma con licencia propia (el caso de PC, que no se
-                # vende como cuenta): una sola variante, al precio de codigo.
-                if self.precio_venta:
-                    _variante(licencia_propia, self.precio_venta, cons)
-                continue
-            if self.precio_venta:
-                _variante(licencia, self.precio_venta, cons)
-            if self.precio_cuenta:
-                for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
-                    if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
-                        _variante(lic, self.precio_cuenta, cons)
+        # Hay una variante por cada consola en la que sale el juego.
+        vivas = [_variante(lic, precio, cons).pk for lic, precio, cons in plan]
+
+        # Lo que este producto tenia y ya no esta en el plan se queda en stock
+        # 0. Pasa al borrar un precio: quitar el de cuenta dejaba las variantes
+        # de primaria y secundaria a la venta al precio viejo, que es
+        # exactamente lo que se quiso dejar de ofrecer. No se borran porque
+        # pueden estar en el historial de una venta.
+        GameDetail.objects.filter(producto=producto).exclude(pk__in=vivas).update(stock=0)
 
         # Ojo: NO se escriben aqui `consola` ni `licencia`. Esos dos campos son
         # el override manual ("para este juego quiero esta consola"), y
