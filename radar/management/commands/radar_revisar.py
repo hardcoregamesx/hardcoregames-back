@@ -38,6 +38,12 @@ class Command(BaseCommand):
             help='Vuelve a publicar los que se puedan arreglar con la configuracion actual.',
         )
         parser.add_argument(
+            '--todos', action='store_true',
+            help='Con --reparar, vuelve a publicar TODO lo publicado, no solo lo roto. Sirve '
+                 'para propagar un cambio de configuracion (stock, titulos) a lo que ya '
+                 'estaba en la tienda.',
+        )
+        parser.add_argument(
             '--retirar', action='store_true',
             help='Deja en stock 0 los que sigan sin arreglo, para que no aparezcan en la tienda.',
         )
@@ -59,8 +65,11 @@ class Command(BaseCommand):
         # oferta que ya no existe: cada venta a perdida. Esas no se tocan.
         ahora = timezone.now()
         vencidos = [j for j in publicados if j.vence and j.vence < ahora]
-        rotos = [j for j in publicados
-                 if j not in vencidos and j.variantes_vendibles() == 0]
+        vigentes = [j for j in publicados if j not in vencidos]
+        if options['todos'] and options['reparar']:
+            rotos = vigentes
+        else:
+            rotos = [j for j in vigentes if j.variantes_vendibles() == 0]
         if vencidos:
             self.stdout.write('')
             self.stdout.write(self.style.WARNING(
@@ -68,8 +77,12 @@ class Command(BaseCommand):
                 'radar_vencer.' % len(vencidos)))
 
         self.stdout.write('')
-        self.stdout.write('Publicados: %s. Sin ninguna variante comprable: %s.'
-                          % (len(publicados), len(rotos)))
+        if options['todos'] and options['reparar']:
+            self.stdout.write('Publicados: %s. Se vuelven a publicar todos (--todos).'
+                              % len(publicados))
+        else:
+            self.stdout.write('Publicados: %s. Sin ninguna variante comprable: %s.'
+                              % (len(publicados), len(rotos)))
         if not rotos:
             self.stdout.write(self.style.SUCCESS('Todo lo publicado se puede comprar.'))
             return

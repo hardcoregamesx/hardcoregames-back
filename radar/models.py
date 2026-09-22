@@ -90,9 +90,11 @@ class ParametrosRadar(models.Model):
         related_name='+', help_text='Tipo de producto del catalogo con el que se crean los publicados.',
     )
     stock_publicacion = models.IntegerField(
-        default=10,
-        help_text='Cuantas unidades queda disponible cada producto publicado. No es stock '
-                  'real: es cuantas ventas se aceptan antes de revisarlo a mano.',
+        default=999,
+        help_text='Cuantas ventas acepta cada producto publicado. NO es inventario: estos '
+                  'juegos son sobre pedido, no hay unidades que se acaben, asi que lo normal '
+                  'es dejarlo alto (999). Bajarlo solo sirve para poner un tope de pedidos '
+                  'antes de revisar a mano; en 1, el segundo cliente ve "agotado".',
     )
 
     actualizado = models.DateTimeField(auto_now=True)

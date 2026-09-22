@@ -274,12 +274,34 @@ def precios(big_ids, region, sesion=None, log=None):
             big_id = producto.get('ProductId')
             info = _mejor_disponibilidad(producto)
             if big_id and info:
+                # El titulo del mercado consultado. El listado de ofertas trae
+                # el del pais donde se compra -- en turco, si la oferta salio
+                # de Turquia -- y ese es el que acababa en la ficha del cliente
+                # colombiano ("Crash Bandicoot - Crashiversary Paketi"). Aqui,
+                # con market=CO y languages=es-co, viene en espanol.
+                info.update(_textos_localizados(producto))
                 resultado[big_id] = info
 
         if log:
             log('  %s precios: %s/%s consultados' % (region, min(inicio + LOTE_DISPLAYCATALOG, len(ids)), len(ids)))
 
     return resultado
+
+
+def _textos_localizados(producto):
+    """Titulo y descripcion en el idioma del mercado consultado."""
+    propiedades = producto.get('LocalizedProperties') or []
+    if not propiedades:
+        return {}
+    prop = propiedades[0]
+    textos = {}
+    titulo = (prop.get('ProductTitle') or '').strip()
+    if titulo:
+        textos['titulo'] = titulo[:300]
+    descripcion = (prop.get('ShortDescription') or prop.get('ProductDescription') or '').strip()
+    if descripcion:
+        textos['descripcion'] = descripcion
+    return textos
 
 
 def _mejor_disponibilidad(producto):

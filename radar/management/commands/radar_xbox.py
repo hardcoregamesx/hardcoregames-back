@@ -213,11 +213,14 @@ class Command(BaseCommand):
         with transaction.atomic():
             for big_id, ficha in fichas.items():
                 ref = referencia.get(big_id) or {}
+                # El titulo de Colombia manda: el del listado viene en el
+                # idioma del pais donde se compra, y es el que ve el cliente.
+                titulo = ref.get('titulo') or ficha['titulo']
                 juego, _ = JuegoDetectado.objects.update_or_create(
                     tienda='XBOX', id_externo=big_id,
                     defaults={
-                        'titulo': ficha['titulo'],
-                        'descripcion': ficha['descripcion'],
+                        'titulo': titulo,
+                        'descripcion': ref.get('descripcion') or ficha['descripcion'],
                         'imagen': ficha['imagen'],
                         'generos': ficha['generos'],
                         'clasificacion': ficha['clasificacion'],
@@ -228,7 +231,7 @@ class Command(BaseCommand):
                         'precio_co': _dec(ref.get('precio_lista')),
                         'precio_co_oferta': _dec(ref.get('precio_oferta')),
                         'comprable_co': bool(ref),
-                        'producto_existente_id': catalogo.get(normalizar(ficha['titulo'])),
+                        'producto_existente_id': catalogo.get(normalizar(titulo)),
                     },
                 )
 

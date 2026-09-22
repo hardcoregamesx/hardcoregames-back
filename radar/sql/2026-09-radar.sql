@@ -123,7 +123,7 @@ ALTER TABLE radar_parametrosradar
   ADD COLUMN IF NOT EXISTS tipo_producto_id integer NULL,
   -- Cuantas unidades queda disponible cada producto publicado. No es stock
   -- real: es cuantas ventas se aceptan antes de tener que revisarlo a mano.
-  ADD COLUMN IF NOT EXISTS stock_publicacion integer NOT NULL DEFAULT 10,
+  ADD COLUMN IF NOT EXISTS stock_publicacion integer NOT NULL DEFAULT 999,
   -- Una cuenta no se vende al precio de un codigo, pero primaria y secundaria
   -- comparten precio: un solo factor para las dos. Vacio a proposito: hasta
   -- que se llene, el radar publica solo el codigo y no inventa precios.
