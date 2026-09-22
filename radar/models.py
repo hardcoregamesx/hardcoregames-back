@@ -575,14 +575,15 @@ class JuegoDetectado(models.Model):
                     if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
                         _variante(lic, self.precio_cuenta, cons)
 
+        # Ojo: NO se escriben aqui `consola` ni `licencia`. Esos dos campos son
+        # el override manual ("para este juego quiero esta consola"), y
+        # rellenarlos con lo que se acaba de usar ataria el juego a una sola
+        # consola en la siguiente publicacion -- justo lo contrario de publicar
+        # en todas las que sale.
         self.producto_publicado_id = producto.id_product
         self.publicado_en = timezone.now()
         self.estado = 'publicado'
-        self.consola = consola
-        self.licencia = licencia
-        self.save(update_fields=[
-            'producto_publicado_id', 'publicado_en', 'estado', 'consola', 'licencia',
-        ])
+        self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado'])
         return producto
 
     def despublicar(self):
