@@ -146,14 +146,28 @@ Si el listado deja de responder, la forma de recuperar el formato es abrir
 `xbox.com/es-co/games/browse`, mirar las peticiones de red del navegador y copiar el cuerpo
 que envia la pagina.
 
-## PlayStation, cuando llegue su turno
+## PlayStation
 
-PlayStation no usa un identificador global: el SKU **cambia en cada region**. La llave que los
-une es el `concept.id`, y el mapa `concept -> SKU por region` hay que construirlo y guardarlo
-juego por juego. Por eso Xbox va primero.
+Sony **no tiene identificador global**: el SKU cambia por zona. Eso manda en el diseno.
 
-Ademas, Sony dolarizo Latinoamerica: la tienda colombiana cotiza en dolares al mismo precio
-que la de USA. Comprar PS en USA ya no da margen de precio, solo el de la divisa.
+- **Colombia y USA comparten zona** (prefijo `UP`): cruzan por SKU directo. Medido: 90%.
+- **Turquia es otra zona** (prefijo `EP`): cruza al 21% por SKU. Sumando el titulo
+  normalizado se llega al **70%**.
+- El 30% que no cruza son, casi siempre, juegos que Colombia no tiene en oferta. Sin precio
+  de referencia no hay margen que calcular, asi que se omiten.
+
+La tienda colombiana de PS **cotiza en dolares**, no en pesos. El precio de referencia se
+pasa a pesos con el dolar de mercado (lo que pagaria el cliente comprando el solo), mientras
+que el costo usa el dolar de saldo de PSN, que es mas barato.
+
+La rejilla de ofertas no trae la fecha de fin: hay que pedirla producto a producto. Como
+cuesta una peticion por juego, solo se pide para los mas rentables (`--max-detalles`, 400 por
+defecto). Sin fecha de fin no hay contador ni retirada automatica.
+
+**Cuando Sony rote el hash** de la consulta pre-aprobada, el radar respondera que la consulta
+fue rechazada y lo dira con esas palabras. Para recapturarlo: abrir store.playstation.com,
+mirar las peticiones de red del navegador y copiar el `sha256Hash` de `categoryGridRetrieve`.
+Los hashes viven en `radar/tiendas/playstation.py`.
 
 ## Por que aqui no hay migraciones de Django
 
