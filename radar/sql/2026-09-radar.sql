@@ -222,3 +222,41 @@ CREATE TABLE IF NOT EXISTS radar_tasatienda (
   nota varchar(300) NOT NULL DEFAULT '',
   actualizado timestamp with time zone NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Combos: varios juegos en una sola cuenta.
+--
+-- El combo se compra entero en UNA region, porque todos los juegos tienen que
+-- caber en la misma cuenta: por eso `region` vive en el combo y no en cada
+-- juego. `producto_publicado_id` es un entero suelto, igual que en
+-- radar_juegodetectado: esta app no declara relaciones formales hacia
+-- products (ver la cabecera de radar/models.py).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS radar_combo (
+  id serial PRIMARY KEY,
+  nombre varchar(120) NOT NULL,
+  tienda varchar(8) NOT NULL,
+  region varchar(2) NOT NULL DEFAULT '',
+  origen varchar(12) NOT NULL DEFAULT 'manual',
+  estado varchar(12) NOT NULL DEFAULT 'nuevo',
+  precio_venta bigint NULL,
+  descripcion text NOT NULL DEFAULT '',
+  imagen_propia varchar(700) NOT NULL DEFAULT '',
+  stock_por_variante integer NOT NULL DEFAULT 1,
+  producto_publicado_id integer NULL,
+  publicado_en timestamp with time zone NULL,
+  creado timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS radar_combo_estado_idx ON radar_combo (estado, tienda);
+
+CREATE TABLE IF NOT EXISTS radar_combojuego (
+  id serial PRIMARY KEY,
+  combo_id integer NOT NULL REFERENCES radar_combo (id) ON DELETE CASCADE,
+  juego_id integer NOT NULL REFERENCES radar_juegodetectado (id) ON DELETE CASCADE,
+  orden integer NOT NULL DEFAULT 0,
+  CONSTRAINT radar_combojuego_unico UNIQUE (combo_id, juego_id)
+);
+
+CREATE INDEX IF NOT EXISTS radar_combojuego_combo_idx ON radar_combojuego (combo_id);

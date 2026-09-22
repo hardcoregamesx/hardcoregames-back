@@ -310,6 +310,58 @@ class TasaTienda(models.Model):
         return {t.tienda: t for t in cls.objects.all()}
 
 
+def resolver_consolas(plataformas, tienda, parametros, colapsar=True):
+    """De los nombres de plataforma de la tienda a las consolas del catalogo.
+
+    Vive aqui, fuera de los modelos, porque la usan dos cosas distintas -- un
+    juego y un combo -- y las reglas de agrupacion tienen que ser las mismas
+    en las dos o el cliente ve un juego etiquetado "Xbox" y el combo que lo
+    contiene etiquetado "Xbox One / Xbox Series".
+
+    Devuelve [(consola, licencia_exclusiva_o_None), ...].
+    """
+    mapa = MapeoConsola.mapa()
+    partes = [p.strip().lower() for p in (plataformas or '').split(',') if p.strip()]
+
+    # Si sale en las dos generaciones de una familia, una sola consola que las
+    # cubre: es la misma cuenta y funciona en las dos. Cuatro variantes --
+    # primaria y secundaria de cada generacion -- al mismo precio hacen que el
+    # cliente crea que esta eligiendo algo.
+    encontradas = []
+    vistas = set()
+    consumidas = set()
+    familias = ()
+    if colapsar:
+        familias = (
+            (('xboxone', 'xboxseriesx'), parametros.consola_ambas('XBOX')),
+            (('ps4', 'ps5'), parametros.consola_ambas('PS')),
+        )
+    for miembros, consola in familias:
+        if consola is None or not all(m in partes for m in miembros):
+            continue
+        consumidas.update(miembros)
+        if consola.pk not in vistas:
+            vistas.add(consola.pk)
+            encontradas.append((consola, None))
+
+    for parte in partes:
+        if parte in consumidas:
+            continue
+        par = mapa.get(parte)
+        if par is None:
+            continue
+        consola, licencia = par
+        if consola.pk in vistas:
+            continue
+        vistas.add(consola.pk)
+        encontradas.append((consola, licencia))
+    if encontradas:
+        return encontradas
+
+    defecto = parametros.consola_xbox if tienda == 'XBOX' else parametros.consola_ps
+    return [(defecto, None)] if defecto else []
+
+
 class JuegoDetectado(models.Model):
     """Un juego visto por el radar, con su ficha y su precio de referencia en Colombia."""
 
@@ -459,48 +511,8 @@ class JuegoDetectado(models.Model):
         """
         if self.consola_id:
             return [(self.consola, None)]
-
         parametros = parametros or ParametrosRadar.actuales()
-        mapa = MapeoConsola.mapa()
-        partes = [p.strip().lower() for p in (self.plataformas or '').split(',') if p.strip()]
-
-        # Si sale en las dos generaciones de una familia, una sola consola que
-        # las cubre: es la misma cuenta y funciona en las dos. Cuatro variantes
-        # -- primaria y secundaria de cada generacion -- al mismo precio hacen
-        # que el cliente crea que esta eligiendo algo.
-        encontradas = []
-        vistas = set()
-        consumidas = set()
-        familias = ()
-        if colapsar:
-            familias = (
-                (('xboxone', 'xboxseriesx'), parametros.consola_ambas('XBOX')),
-                (('ps4', 'ps5'), parametros.consola_ambas('PS')),
-            )
-        for miembros, consola in familias:
-            if consola is None or not all(m in partes for m in miembros):
-                continue
-            consumidas.update(miembros)
-            if consola.pk not in vistas:
-                vistas.add(consola.pk)
-                encontradas.append((consola, None))
-
-        for parte in partes:
-            if parte in consumidas:
-                continue
-            par = mapa.get(parte)
-            if par is None:
-                continue
-            consola, licencia = par
-            if consola.pk in vistas:
-                continue
-            vistas.add(consola.pk)
-            encontradas.append((consola, licencia))
-        if encontradas:
-            return encontradas
-
-        defecto = parametros.consola_xbox if self.tienda == 'XBOX' else parametros.consola_ps
-        return [(defecto, None)] if defecto else []
+        return resolver_consolas(self.plataformas, self.tienda, parametros, colapsar=colapsar)
 
     def preparar(self, parametros=None):
         """Deja el juego listo para publicar: region congelada y precios puestos.
@@ -820,3 +832,323 @@ class EjecucionRadar(models.Model):
     def __str__(self):
         estado = 'OK' if self.ok else 'FALLO'
         return '%s %s %s' % (self.get_tienda_display(), self.inicio.strftime('%Y-%m-%d %H:%M'), estado)
+
+
+# ---------------------------------------------------------------------------
+# Combos: varios juegos en una sola cuenta
+# ---------------------------------------------------------------------------
+
+COMBO_MIN_JUEGOS = 2
+COMBO_MAX_JUEGOS = 10
+
+ORIGENES_COMBO = [
+    ('manual', 'Armado a mano'),
+    ('franquicia', 'Propuesto por franquicia'),
+    ('genero', 'Propuesto por genero'),
+    ('baratos', 'Propuesto por baratos conocidos'),
+]
+
+
+class Combo(models.Model):
+    """Varios juegos vendidos juntos en UNA cuenta.
+
+    La diferencia con un juego suelto no es de tamano, es de naturaleza: el
+    combo se compra entero en una sola region, porque todos los juegos tienen
+    que caber en la misma cuenta. Eso manda en el resto del diseno -- si un
+    juego no esta en oferta en esa region, el combo no se arma.
+
+    Se publica como un producto normal del catalogo, igual que los sueltos:
+    sobre pedido y en modo reserva, para que el carrito, las pasarelas y los
+    correos que ya existen funcionen sin tocar nada.
+    """
+
+    nombre = models.CharField(
+        max_length=120,
+        help_text='Como lo vera el cliente, completo. Ej: "Combo cooperativos".',
+    )
+    tienda = models.CharField(max_length=8, choices=TIENDAS)
+    region = models.CharField(
+        max_length=2,
+        help_text='Donde se compran TODOS los juegos. Una sola: tienen que caber en una cuenta.',
+    )
+    origen = models.CharField(max_length=12, choices=ORIGENES_COMBO, default='manual')
+    estado = models.CharField(max_length=12, choices=ESTADOS, default='nuevo')
+
+    precio_venta = models.BigIntegerField(
+        null=True, blank=True,
+        help_text='Precio en pesos del combo completo. Sin esto no se puede publicar.',
+    )
+    descripcion = models.TextField(
+        blank=True, default='',
+        help_text='Se genera con la lista de juegos y su plataforma. Editala si quieres.',
+    )
+    imagen_propia = models.CharField(
+        max_length=700, blank=True, default='',
+        help_text='URL de una imagen hecha a mano. Vacio = se usa la caratula del juego mas '
+                  'popular del combo, oscurecida y con el nombre encima.',
+    )
+    stock_por_variante = models.IntegerField(
+        default=1,
+        help_text='Ventas que acepta cada licencia antes de agotarse. En 1, una cuenta da dos '
+                  'ventas: una primaria y una secundaria. Armar un combo cuesta una tarde, '
+                  'asi que aqui el tope si tiene sentido.',
+    )
+
+    producto_publicado_id = models.IntegerField(null=True, blank=True)
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        verbose_name = 'un combo'
+        verbose_name_plural = 'Combos'
+        ordering = ['-creado']
+
+    def __str__(self):
+        return self.nombre
+
+    # --- los juegos que lo forman ------------------------------------------
+
+    def juegos(self):
+        return [item.juego for item in self.items.all()]
+
+    @property
+    def cantidad(self):
+        return self.items.count()
+
+    def precio_por_juego(self, juego):
+        """El precio regional de este juego en la region del combo."""
+        return next((p for p in juego.precios.all() if p.region == self.region), None)
+
+    # --- numeros ------------------------------------------------------------
+
+    def precio_co_total(self):
+        """Lo que costaria comprarlos uno por uno en la tienda colombiana."""
+        total = 0
+        for juego in self.juegos():
+            if juego.precio_co_vigente:
+                total += int(juego.precio_co_vigente)
+        return total or None
+
+    def costo_total(self):
+        """Lo que te cuesta a ti comprarlos todos en la region del combo."""
+        total = 0
+        for juego in self.juegos():
+            precio = self.precio_por_juego(juego)
+            if precio is None or precio.costo_cop is None:
+                return None
+            total += int(precio.costo_cop)
+        return total
+
+    def margen(self):
+        costo = self.costo_total()
+        if costo is None or not self.precio_venta:
+            return None
+        return int(self.precio_venta) - costo
+
+    @property
+    def vence(self):
+        """La primera promocion que muere. El combo cae entero con ella.
+
+        No es la ultima ni el promedio: el precio se armo contando ese juego
+        barato, y seguir vendiendolo cuando vuelve a su precio es vender a
+        perdida.
+        """
+        fechas = []
+        for juego in self.juegos():
+            precio = self.precio_por_juego(juego)
+            if precio is not None and precio.fecha_fin:
+                fechas.append(precio.fecha_fin)
+        return min(fechas) if fechas else None
+
+    # --- como se ve ---------------------------------------------------------
+
+    def juego_portada(self):
+        """El mas popular del combo: su caratula es la del combo."""
+        juegos = [j for j in self.juegos() if j.imagen]
+        if not juegos:
+            return None
+        return max(juegos, key=lambda j: j.rating_conteo or 0)
+
+    def imagen(self):
+        if self.imagen_propia:
+            return self.imagen_propia
+        portada = self.juego_portada()
+        return portada.imagen if portada else ''
+
+    def plataformas(self):
+        """La union de las plataformas de todos los juegos.
+
+        Union y no interseccion a proposito: el combo se etiqueta en todo lo
+        que toca y la descripcion dice que juego corre donde. Con la
+        interseccion, un solo juego exclusivo de una generacion escondia el
+        combo a medio catalogo.
+        """
+        vistas = []
+        for juego in self.juegos():
+            for parte in (juego.plataformas or '').split(','):
+                parte = parte.strip()
+                if parte and parte not in vistas:
+                    vistas.append(parte)
+        return ', '.join(vistas)
+
+    def descripcion_generada(self):
+        """Lista de juegos con su plataforma, lista para la ficha."""
+        lineas = ['Esta cuenta incluye %s juegos:' % self.cantidad, '']
+        for indice, juego in enumerate(self.juegos(), start=1):
+            plataformas = juego.plataformas or ''
+            lineas.append('%s. %s%s' % (
+                indice, juego.titulo, ' - %s' % plataformas if plataformas else ''))
+        lineas.append('')
+        lineas.append('Se entrega en el horario de la tienda, de lunes a sabado '
+                      'de 10:00 a.m. a 7:00 p.m.')
+        return '\n'.join(lineas)
+
+    def consolas_publicacion(self, parametros=None, colapsar=True):
+        parametros = parametros or ParametrosRadar.actuales()
+        return resolver_consolas(self.plataformas(), self.tienda, parametros, colapsar=colapsar)
+
+    # --- validacion y publicacion -------------------------------------------
+
+    def motivo_no_publicable(self, parametros=None):
+        """Por que no se puede publicar, en una frase. None si se puede."""
+        parametros = parametros or ParametrosRadar.actuales()
+        cantidad = self.cantidad
+        if cantidad < COMBO_MIN_JUEGOS:
+            return 'Tiene %s juego(s). Un combo necesita al menos %s.' % (
+                cantidad, COMBO_MIN_JUEGOS)
+        if cantidad > COMBO_MAX_JUEGOS:
+            return 'Tiene %s juegos. El maximo es %s.' % (cantidad, COMBO_MAX_JUEGOS)
+        if not self.precio_venta:
+            return 'No tiene precio. Ponselo antes de publicar.'
+        if not self.region:
+            return 'No tiene region de compra.'
+
+        sin_oferta = [j.titulo for j in self.juegos() if self.precio_por_juego(j) is None]
+        if sin_oferta:
+            return ('Estos juegos no estan en oferta en %s: %s. Un combo se compra entero en '
+                    'una sola region.' % (self.region, ', '.join(sin_oferta[:3])))
+
+        if parametros.licencia_primaria is None and parametros.licencia_secundaria is None:
+            return ('No hay licencia primaria ni secundaria en Parametros del radar. Un combo '
+                    'se vende como cuenta, nunca como codigo.')
+        if parametros.tipo_producto is None:
+            return 'Falta el tipo de producto por defecto en Parametros del radar.'
+        if not self.consolas_publicacion(parametros):
+            return ('Ninguna de sus plataformas ("%s") tiene consola asignada en Consolas por '
+                    'plataforma.' % self.plataformas())
+        return None
+
+    def publicar(self, parametros=None):
+        """Crea o actualiza el producto del catalogo para este combo.
+
+        Mismo molde que un juego suelto -- sobre pedido, modo reserva con el
+        anticipo igual al precio total -- con dos diferencias: nunca se vende
+        como codigo, y el stock es un tope de verdad, porque cada venta obliga
+        a comprar todos los juegos y armar una cuenta nueva.
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from products.models import GameDetail, Products
+
+        parametros = parametros or ParametrosRadar.actuales()
+        motivo = self.motivo_no_publicable(parametros)
+        if motivo:
+            raise ValueError(motivo)
+
+        destinos = self.consolas_publicacion(parametros)
+        licencias = [l for l in (parametros.licencia_primaria, parametros.licencia_secundaria)
+                     if l is not None]
+
+        plan = []
+        for cons, licencia_propia in destinos:
+            if licencia_propia is not None:
+                # Plataforma con licencia exclusiva (PC): una sola variante.
+                plan.append((licencia_propia, cons))
+                continue
+            for lic in licencias:
+                plan.append((lic, cons))
+        if not plan:
+            raise ValueError('La configuracion actual no produce ninguna variante vendible.')
+
+        vence = self.vence
+        base = vence.date() if vence else timezone.now().date()
+        fecha_lanzamiento = max(base, timezone.now().date()) + timedelta(days=1)
+
+        if not self.descripcion:
+            self.descripcion = self.descripcion_generada()
+
+        producto = None
+        if self.producto_publicado_id:
+            producto = Products.objects.filter(id_product=self.producto_publicado_id).first()
+
+        campos = dict(
+            title=self.nombre[:200],
+            description=self.descripcion,
+            image=self.imagen(),
+            sobre_pedido=True,
+            radar_tienda=self.tienda,
+            fecha_lanzamiento=fecha_lanzamiento,
+        )
+        if producto is None:
+            producto = Products.objects.create(
+                type_id=parametros.tipo_producto,
+                calification=max((j.rating_conteo or 0) for j in self.juegos()),
+                **campos)
+        else:
+            for campo, valor in campos.items():
+                setattr(producto, campo, valor)
+            producto.save()
+
+        etiquetas = self.consolas_publicacion(parametros, colapsar=False) or destinos
+        producto.consola.set([cons for cons, _ in etiquetas])
+
+        vivas = []
+        for lic, cons in plan:
+            variante = GameDetail.objects.filter(
+                producto=producto, consola=cons, licencia=lic).first()
+            if variante is None:
+                variante = GameDetail(producto=producto, consola=cons, licencia=lic)
+            variante.precio = int(self.precio_venta)
+            variante.precio_descuento = 0
+            variante.stock = self.stock_por_variante
+            variante.reserva_activa = True
+            variante.monto_reserva = int(self.precio_venta)
+            variante.cuotas_activas = False
+            variante.save()
+            vivas.append(variante.pk)
+
+        GameDetail.objects.filter(producto=producto).exclude(pk__in=vivas).update(stock=0)
+
+        self.producto_publicado_id = producto.id_product
+        self.publicado_en = timezone.now()
+        self.estado = 'publicado'
+        self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado', 'descripcion'])
+        return producto
+
+    def despublicar(self):
+        from products.models import GameDetail
+
+        if self.producto_publicado_id:
+            GameDetail.objects.filter(producto_id=self.producto_publicado_id).update(stock=0)
+        self.estado = 'vencido'
+        self.save(update_fields=['estado'])
+
+
+class ComboJuego(models.Model):
+    """Un juego dentro de un combo."""
+
+    combo = models.ForeignKey(Combo, related_name='items', on_delete=models.CASCADE)
+    juego = models.ForeignKey(JuegoDetectado, related_name='+', on_delete=models.CASCADE)
+    orden = models.IntegerField(default=0)
+
+    class Meta:
+        managed = False
+        verbose_name = 'un juego del combo'
+        verbose_name_plural = 'Juegos del combo'
+        unique_together = [('combo', 'juego')]
+        ordering = ['orden', 'id']
+
+    def __str__(self):
+        return self.juego.titulo

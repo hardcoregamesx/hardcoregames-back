@@ -45,7 +45,7 @@ docker exec -i hc-postgres psql -U hardcoregames -d hardcoregames -v ON_ERROR_ST
 # cumplirse, y el script empezo a abortar antes de promover: un guardarraíl
 # convertido en bloqueo, y encima con un mensaje que parecia un problema de la
 # base de datos. Contar cosas que crecen es fragil; comprobar nombres no.
-REQUERIDAS="radar_parametrosradar radar_tasacambio radar_juegodetectado radar_precioregional radar_ejecucionradar radar_tasatienda radar_franquicia"
+REQUERIDAS="radar_parametrosradar radar_tasacambio radar_juegodetectado radar_precioregional radar_ejecucionradar radar_tasatienda radar_franquicia radar_combo radar_combojuego"
 FALTAN=""
 for TABLA in $REQUERIDAS; do
   EXISTE=$(docker exec hc-postgres psql -U hardcoregames -d hardcoregames -tAc \

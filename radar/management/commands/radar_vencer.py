@@ -12,7 +12,7 @@ Pensado para correr varias veces al dia:
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from radar.models import JuegoDetectado
+from radar.models import Combo, JuegoDetectado
 
 
 class Command(BaseCommand):
@@ -29,9 +29,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         ahora = timezone.now()
-        publicados = (JuegoDetectado.objects
-                      .filter(estado='publicado')
-                      .prefetch_related('precios'))
+        publicados = list(JuegoDetectado.objects
+                          .filter(estado='publicado')
+                          .prefetch_related('precios'))
+        # Un combo cae con la PRIMERA de sus promociones (Combo.vence), porque
+        # su precio se armo contando ese juego barato.
+        publicados += list(Combo.objects
+                           .filter(estado='publicado')
+                           .prefetch_related('items__juego__precios'))
 
         vencidos = [j for j in publicados if j.vence and j.vence < ahora]
 
@@ -39,10 +44,10 @@ class Command(BaseCommand):
             self.stdout.write('Nada que retirar: ninguna promocion publicada ha vencido.')
             return
 
-        for juego in vencidos:
-            self.stdout.write('  %s (vencio %s)' % (juego.titulo, juego.vence.strftime('%d/%m/%Y')))
+        for item in vencidos:
+            self.stdout.write('  %s (vencio %s)' % (item, item.vence.strftime('%d/%m/%Y')))
             if not options['dry_run']:
-                juego.despublicar()
+                item.despublicar()
 
         if options['dry_run']:
             self.stdout.write(self.style.WARNING(

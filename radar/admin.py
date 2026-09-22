@@ -14,6 +14,10 @@ from django.urls import path, reverse
 from django.utils.html import format_html
 
 from radar.models import (
+    COMBO_MAX_JUEGOS,
+    COMBO_MIN_JUEGOS,
+    Combo,
+    ComboJuego,
     EjecucionRadar,
     Franquicia,
     MapeoConsola,
@@ -449,3 +453,157 @@ class EjecucionRadarAdmin(admin.ModelAdmin):
         if obj.ok:
             return format_html('<b style="color:#27ae60">OK</b>')
         return format_html('<b style="color:#c0392b">FALLO</b>')
+
+
+class ComboJuegoInline(admin.TabularInline):
+    """Los juegos del combo, con su costo en la region elegida al lado.
+
+    El costo se muestra aqui y no solo en el total porque al armar un combo la
+    pregunta constante es "cual me esta saliendo caro": con nueve juegos, un
+    solo titulo de 40.000 se come el margen y desde el total no se ve cual es.
+    """
+
+    model = ComboJuego
+    extra = 3
+    autocomplete_fields = ['juego']
+    readonly_fields = ['col_costo', 'col_precio_co', 'col_vence']
+    verbose_name = 'juego'
+    verbose_name_plural = 'Juegos del combo'
+
+    @admin.display(description='Te cuesta')
+    def col_costo(self, obj):
+        if obj.pk is None or not obj.combo_id:
+            return '-'
+        precio = obj.combo.precio_por_juego(obj.juego)
+        if precio is None:
+            return format_html('<b style="color:#c0392b">sin oferta en {}</b>', obj.combo.region)
+        return _pesos(precio.costo_cop)
+
+    @admin.display(description='En Colombia')
+    def col_precio_co(self, obj):
+        return _pesos(obj.juego.precio_co_vigente) if obj.pk else '-'
+
+    @admin.display(description='Vence')
+    def col_vence(self, obj):
+        if obj.pk is None or not obj.combo_id:
+            return '-'
+        precio = obj.combo.precio_por_juego(obj.juego)
+        if precio is None or not precio.fecha_fin:
+            return '-'
+        return precio.fecha_fin.strftime('%d/%m/%Y')
+
+
+@admin.register(Combo)
+class ComboAdmin(admin.ModelAdmin):
+    """Armar, valorar y publicar combos.
+
+    El flujo es el mismo de los juegos sueltos: el combo nace como borrador
+    -- lo arma el dueno o lo propone `radar_combos` --, se le pone precio
+    mirando el costo, y se publica cuando convence.
+    """
+
+    list_display = ['nombre', 'tienda', 'region', 'col_cantidad', 'col_precio_co',
+                    'col_costo', 'precio_venta', 'col_margen', 'col_vence',
+                    'col_estado', 'col_problema']
+    list_editable = ['precio_venta']
+    list_filter = ['estado', 'tienda', 'origen', 'region']
+    search_fields = ['nombre']
+    readonly_fields = ['producto_publicado_id', 'publicado_en', 'creado', 'col_descripcion_sugerida']
+    inlines = [ComboJuegoInline]
+    actions = ['accion_publicar', 'accion_despublicar', 'accion_regenerar_descripcion']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related('items__juego__precios')
+
+    @admin.display(description='Juegos')
+    def col_cantidad(self, obj):
+        color = '#27ae60' if COMBO_MIN_JUEGOS <= obj.cantidad <= COMBO_MAX_JUEGOS else '#c0392b'
+        return format_html('<b style="color:{}">{}</b>', color, obj.cantidad)
+
+    @admin.display(description='Suma en Colombia')
+    def col_precio_co(self, obj):
+        return _pesos(obj.precio_co_total())
+
+    @admin.display(description='Te cuesta')
+    def col_costo(self, obj):
+        return _pesos(obj.costo_total())
+
+    @admin.display(description='Margen')
+    def col_margen(self, obj):
+        margen = obj.margen()
+        if margen is None:
+            return '-'
+        color = '#27ae60' if margen > 0 else '#c0392b'
+        return format_html('<b style="color:{}">{}</b>', color, _pesos(margen))
+
+    @admin.display(description='Vence')
+    def col_vence(self, obj):
+        vence = obj.vence
+        return vence.strftime('%d/%m/%Y') if vence else '-'
+
+    @admin.display(description='Estado')
+    def col_estado(self, obj):
+        colores = {
+            'nuevo': '#7f8c8d', 'aprobado': '#2980b9', 'publicado': '#27ae60',
+            'descartado': '#c0392b', 'vencido': '#d35400',
+        }
+        return format_html(
+            '<b style="color:{}">{}</b>', colores.get(obj.estado, '#000'),
+            obj.get_estado_display())
+
+    @admin.display(description='Falta')
+    def col_problema(self, obj):
+        """Lo que impide publicarlo, visible sin tener que intentarlo.
+
+        Antes habia que darle a publicar para enterarse; con veinte borradores
+        propuestos eso son veinte intentos.
+        """
+        if obj.estado == 'publicado':
+            return ''
+        motivo = obj.motivo_no_publicable()
+        if motivo is None:
+            return format_html('<span style="color:#27ae60">listo para publicar</span>')
+        return format_html('<span style="color:#c0392b" title="{}">{}</span>',
+                           motivo, motivo[:60])
+
+    @admin.display(description='Descripcion sugerida')
+    def col_descripcion_sugerida(self, obj):
+        if obj.pk is None:
+            return 'Guarda el combo con sus juegos y aqui aparece la lista.'
+        return format_html('<pre style="white-space:pre-wrap">{}</pre>',
+                           obj.descripcion_generada())
+
+    @admin.action(description='Publicar los seleccionados')
+    def accion_publicar(self, request, queryset):
+        parametros = ParametrosRadar.actuales()
+        publicados = 0
+        fallos = Counter()
+        for combo in queryset:
+            try:
+                combo.publicar(parametros)
+                publicados += 1
+            except ValueError as exc:
+                fallos['%s: %s' % (combo.nombre, exc)] += 1
+        if publicados:
+            self.message_user(
+                request, '%s combos publicados y ya visibles en la landing.' % publicados,
+                messages.SUCCESS)
+        for mensaje, _veces in fallos.most_common(6):
+            self.message_user(request, mensaje, messages.ERROR)
+
+    @admin.action(description='Retirar de la tienda')
+    def accion_despublicar(self, request, queryset):
+        for combo in queryset:
+            combo.despublicar()
+        self.message_user(request, '%s combos retirados.' % queryset.count(), messages.SUCCESS)
+
+    @admin.action(description='Regenerar la descripcion con los juegos actuales')
+    def accion_regenerar_descripcion(self, request, queryset):
+        for combo in queryset:
+            combo.descripcion = combo.descripcion_generada()
+            combo.save(update_fields=['descripcion'])
+        self.message_user(
+            request,
+            '%s descripciones regeneradas. Si el combo ya estaba publicado, vuelve a '
+            'publicarlo para que el cambio llegue a la tienda.' % queryset.count(),
+            messages.SUCCESS)

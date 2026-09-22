@@ -21,7 +21,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from radar.models import JuegoDetectado
+from radar.models import Combo, JuegoDetectado
 
 
 class Command(BaseCommand):
@@ -44,10 +44,16 @@ class Command(BaseCommand):
         from products.models import GameDetail, PaymentPlan, Products, SaleDetail, ShoppingCar
 
         limite = timezone.now() - timezone.timedelta(days=options['dias'])
-        candidatos = (JuegoDetectado.objects
-                      .filter(estado__in=['publicado', 'vencido'])
-                      .exclude(producto_publicado_id=None)
-                      .prefetch_related('precios'))
+        candidatos = list(JuegoDetectado.objects
+                          .filter(estado__in=['publicado', 'vencido'])
+                          .exclude(producto_publicado_id=None)
+                          .prefetch_related('precios'))
+        # Los combos ensucian igual, y mas: cada uno es un producto entero con
+        # su ficha y su descripcion larga.
+        candidatos += list(Combo.objects
+                           .filter(estado__in=['publicado', 'vencido'])
+                           .exclude(producto_publicado_id=None)
+                           .prefetch_related('items__juego__precios'))
 
         borrados, conservados = 0, 0
         for juego in candidatos:
@@ -71,7 +77,7 @@ class Command(BaseCommand):
                 conservados += 1
                 continue
 
-            self.stdout.write('  borrar: [%s] %s' % (pid, juego.titulo))
+            self.stdout.write('  borrar: [%s] %s' % (pid, juego))
             if not options['dry_run']:
                 with transaction.atomic():
                     GameDetail.objects.filter(producto_id=pid).delete()
