@@ -32,7 +32,6 @@ from radar.models import (
     ComboJuego,
     Franquicia,
     JuegoDetectado,
-    ParametrosRadar,
 )
 
 CRITERIOS = ['franquicia', 'genero', 'baratos']
@@ -65,7 +64,6 @@ class Command(BaseCommand):
         parser.add_argument('--dry-run', action='store_true')
 
     def handle(self, *args, **options):
-        parametros = ParametrosRadar.actuales()
         criterios = CRITERIOS if options['criterio'] == 'todos' else [options['criterio']]
         tiendas = ['XBOX', 'PS'] if options['tienda'] == 'todas' else [options['tienda']]
 
