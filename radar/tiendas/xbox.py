@@ -283,7 +283,16 @@ def precios(big_ids, region, sesion=None, log=None):
 
 
 def _mejor_disponibilidad(producto):
-    """Del arbol de displaycatalog saca el precio comprable mas barato."""
+    """Del arbol de displaycatalog saca el precio comprable mas barato.
+
+    Cuidado con los precios en cero. Un mismo juego trae varias entradas con
+    accion `Purchase`, y algunas valen 0: son las de Game Pass y suscripciones,
+    no compras reales. Quedarse con "la mas barata" a secas elegia esa, el
+    precio de Colombia quedaba en 0, y como un 0 se trata igual que "sin
+    precio", el juego desaparecia del calculo de rentabilidad. Death Stranding
+    (160.000 -> 56.000) y A Plague Tale (146.900 -> 29.380) salian asi, sin
+    precio, estando perfectamente a la venta.
+    """
     mejor = None
     for sku in (producto.get('DisplaySkuAvailabilities') or []):
         for disp in (sku.get('Availabilities') or []):
@@ -293,17 +302,17 @@ def _mejor_disponibilidad(producto):
             datos_precio = ((disp.get('OrderManagementData') or {}).get('Price') or {})
             lista = datos_precio.get('ListPrice')
             msrp = datos_precio.get('MSRP')
-            if lista is None and msrp is None:
+            valor = lista if lista else msrp
+            if not valor or valor <= 0:
                 continue
             fin = _parsear_fecha((disp.get('Conditions') or {}).get('EndDate'))
             candidato = {
                 'moneda': datos_precio.get('CurrencyCode') or '',
-                'precio_lista': msrp,
-                'precio_oferta': lista,
+                'precio_lista': msrp or lista,
+                'precio_oferta': lista or msrp,
                 'comprable': True,
                 'fecha_fin': fin,
             }
-            valor = lista if lista is not None else msrp
-            if mejor is None or (valor is not None and valor < (mejor['precio_oferta'] or mejor['precio_lista'])):
+            if mejor is None or valor < (mejor['precio_oferta'] or mejor['precio_lista']):
                 mejor = candidato
     return mejor
