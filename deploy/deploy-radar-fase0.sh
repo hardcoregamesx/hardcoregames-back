@@ -166,6 +166,9 @@ agregar 'radar_tasas'  "0 6 * * *    docker exec hc-django python manage.py rada
 agregar 'radar_xbox'   "15 6 * * *   docker exec hc-django python manage.py radar_xbox    >> $LOG 2>&1"
 # Cada media hora: una promocion puede vencer a cualquier hora del dia.
 agregar 'radar_playstation' "40 6 * * *   docker exec hc-django python manage.py radar_playstation >> $LOG 2>&1"
+# Los combos se proponen despues de los dos radares: necesitan las ofertas del
+# dia ya guardadas. Son borradores sin precio, no publican nada.
+agregar 'radar_combos' "50 6 * * *   docker exec hc-django python manage.py radar_combos    >> $LOG 2>&1"
 agregar 'radar_vencer' "*/30 * * * * docker exec hc-django python manage.py radar_vencer  >> $LOG 2>&1"
 # Una vez al dia basta para borrar lo que vencio sin venderse.
 agregar 'radar_limpiar' "30 5 * * *  docker exec hc-django python manage.py radar_limpiar >> $LOG 2>&1"

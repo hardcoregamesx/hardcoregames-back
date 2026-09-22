@@ -74,6 +74,54 @@ docker exec hc-django python manage.py radar_revisar --reparar
 15 6 * * * docker exec hc-django python manage.py radar_xbox   >> /opt/hardcoregames/radar.log 2>&1
 ```
 
+## Combos
+
+Un combo es **una cuenta con varios juegos dentro**, vendida como un solo
+producto. La diferencia con un juego suelto no es de tamano: el combo se compra
+entero en **una sola region**, porque todos los juegos tienen que caber en la
+misma cuenta. De ahi sale casi todo lo demas -- si un juego no esta en oferta en
+esa region, el combo no se arma.
+
+```bash
+# Propone borradores. No publica ni pone precios.
+docker exec hc-django python manage.py radar_combos
+docker exec hc-django python manage.py radar_combos --criterio franquicia --dry-run
+```
+
+Tres criterios, que son tres razones distintas por las que alguien compra un
+paquete:
+
+| Criterio | Que agrupa |
+|---|---|
+| `franquicia` | La saga que este en oferta a la vez (el combo Final Fantasy) |
+| `genero` | Las categorias que ya manda la tienda (los cooperativos) |
+| `baratos` | Titulos de franquicias conocidas con costo bajo, hasta llenar un presupuesto |
+
+El comando **deja borradores sin precio** y ahi se detiene, a proposito: ninguna
+regla va a adivinar que *golfito* pega con *worms*, y un combo mal armado se ve
+peor que no tener combos. Se revisan en el admin, en **Combos**, donde cada
+juego muestra su costo al lado -- con nueve titulos, uno caro se come el margen
+y desde el total no se ve cual es.
+
+Decisiones que ya estan tomadas y conviene no reabrir sin motivo:
+
+- **Entre 2 y 10 juegos.** Menos no es un combo; mas no cabe en la tarjeta ni en
+  la descripcion, y arma cuentas dificiles de reponer.
+- **Se vende como cuenta, nunca como codigo.** Un combo es una cuenta.
+- **Consolas: la union**, no la interseccion, y la descripcion dice que juego
+  corre donde. Con la interseccion, un solo juego exclusivo de una generacion
+  escondia el combo a medio catalogo.
+- **Stock 1 por licencia**: una cuenta da dos ventas -- una primaria y una
+  secundaria -- y se agota. Al reves que los juegos sueltos, donde el stock es
+  alto porque son sobre pedido: armar un combo cuesta una tarde.
+- **Cae entero con la PRIMERA promocion que vence.** El precio se armo contando
+  ese juego barato; seguir vendiendolo despues es vender a perdida.
+- **La imagen** es la caratula del juego mas popular, oscurecida y con el nombre
+  encima, hecho con CSS en la landing. No hay forma de generar imagenes en el
+  servidor: `Products.image` es una URL de texto, no hay Pillow ni
+  almacenamiento de archivos. Si un combo vende bien, se le pega una URL hecha a
+  mano en `imagen_propia` y esa manda.
+
 ## Publicado no es lo mismo que comprable
 
 Un juego publicado vive en dos sitios, y cada uno saca el precio de un lado
