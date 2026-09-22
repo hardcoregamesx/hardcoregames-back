@@ -142,8 +142,8 @@ class MapeoConsola(models.Model):
         related_name='+', verbose_name='Licencia exclusiva (solo PC)',
         help_text='DEJAR VACIA en Xbox y PlayStation. Vacia = el juego se publica con las '
                   'licencias normales: codigo y cuenta (primaria y secundaria). Llenarla '
-                  'significa "esta plataforma se vende UNICAMENTE con esta licencia y solo al '
-                  'precio de codigo", que es el caso de PC, que no se vende como cuenta.',
+                  'significa "esta plataforma se vende UNICAMENTE con esta licencia", que es '
+                  'el caso de PC. Usa el precio de codigo del juego; si no tiene, el de cuenta.',
     )
     activa = models.BooleanField(default=True)
 
@@ -483,11 +483,8 @@ class JuegoDetectado(models.Model):
                     'primaria ni secundaria. Sin ellas no hay nada que publicar: '
                     'configuralas, o ponle tambien precio de codigo.')
             return (
-                'Solo tiene precio de cuenta, pero sus plataformas ("%s") tienen una licencia '
-                'exclusiva asignada en Consolas por plataforma, y esa modalidad solo usa el '
-                'precio de codigo. Si Xbox o PlayStation salieron en esa lista, lo que hay que '
-                'hacer es DEJAR VACIA esa columna (vacia = codigo y cuenta normales); la '
-                'licencia exclusiva es solo para PC.' % (self.plataformas or '?'))
+                'Sus plataformas ("%s") no producen ninguna variante. Revisa en Consolas por '
+                'plataforma que tengan consola asignada.' % (self.plataformas or '?'))
         return (
             'La configuracion actual no produce ninguna variante (%s consola(s), licencia '
             'por defecto %s). Revisa las licencias en Parametros del radar.'
@@ -550,10 +547,15 @@ class JuegoDetectado(models.Model):
         plan = []
         for cons, licencia_propia in destinos:
             if licencia_propia is not None:
-                # Plataforma con licencia propia (el caso de PC, que no se
-                # vende como cuenta): una sola variante, al precio de codigo.
-                if self.precio_venta:
-                    plan.append((licencia_propia, self.precio_venta, cons))
+                # Plataforma con licencia exclusiva (el caso de PC): una sola
+                # variante. Se prefiere el precio de codigo, pero si no hay se
+                # usa el de cuenta -- en la tienda de Microsoft un mismo
+                # producto cubre Xbox y PC (Play Anywhere), asi que la cuenta
+                # que se compra ya trae el juego en PC y dejarlo sin publicar
+                # era regalar una venta que no cuesta nada extra.
+                precio = self.precio_venta or self.precio_cuenta
+                if precio:
+                    plan.append((licencia_propia, precio, cons))
                 continue
             if self.precio_venta:
                 plan.append((licencia, self.precio_venta, cons))
