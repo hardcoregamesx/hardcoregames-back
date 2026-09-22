@@ -5,6 +5,8 @@ El flujo es de dos pasos a proposito. "Aprobar" fija el precio sugerido y la
 region mas barata pero no toca la tienda, para poder revisar los precios con
 calma. "Publicar" ya crea el producto real y lo pone a la venta.
 """
+from collections import Counter
+
 from django.contrib import admin, messages
 from django.db.models import Q
 from django.shortcuts import redirect
@@ -238,8 +240,11 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
                       .prefetch_related('precios'))
 
         parametros = ParametrosRadar.actuales()
-        publicados, sin_region, fallos = 0, 0, []
+        total = 0
+        publicados, sin_region = 0, 0
+        fallos = Counter()
         for juego in candidatos:
+            total += 1
             if not juego.preparar(parametros):
                 sin_region += 1
                 continue
@@ -247,24 +252,40 @@ class JuegoDetectadoAdmin(admin.ModelAdmin):
                 juego.publicar(parametros)
                 publicados += 1
             except ValueError as exc:
-                fallos.append(str(exc))
+                fallos[str(exc)] += 1
 
         if publicados:
             self.message_user(
                 request,
                 '%s juegos con precio publicados y ya visibles en la landing.' % publicados,
                 messages.SUCCESS)
-        else:
+        elif total == 0:
+            # Solo se dice "ninguno tenia precio" cuando de verdad no habia
+            # candidatos. Decirlo cuando fallaron por otra causa manda a buscar
+            # el problema donde no esta.
             self.message_user(
                 request,
                 'Ningun juego tenia precio. Escribe precios en las columnas y vuelve a intentarlo.',
                 messages.WARNING)
+
         if sin_region:
             self.message_user(
                 request, '%s sin region donde comprarlos: no se publicaron.' % sin_region,
                 messages.WARNING)
-        for mensaje in fallos[:5]:
-            self.message_user(request, mensaje, messages.ERROR)
+
+        # Un mismo fallo de configuracion afecta a todos los juegos a la vez:
+        # repetirlo una vez por juego llena la pantalla y no dice nada nuevo.
+        enlace = reverse('admin:radar_parametrosradar_changelist')
+        for mensaje, veces in fallos.most_common():
+            texto = mensaje if veces == 1 else '%s (afecta a %s juegos)' % (mensaje, veces)
+            if 'Parametros del radar' in mensaje:
+                self.message_user(
+                    request,
+                    format_html('{} <a href="{}" style="color:#fff;text-decoration:underline">'
+                                'Abrir Parametros del radar</a>', texto, enlace),
+                    messages.ERROR)
+            else:
+                self.message_user(request, texto, messages.ERROR)
 
     @admin.action(description='PUBLICAR TODOS los que tengan precio (ignora la seleccion)')
     def accion_publicar_todos(self, request, queryset):
