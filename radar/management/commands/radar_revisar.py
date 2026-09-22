@@ -18,10 +18,12 @@ y es lo que este comando encuentra.
     docker exec hc-django python manage.py radar_revisar
     docker exec hc-django python manage.py radar_revisar --reparar
 """
+from collections import Counter
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from radar.models import JuegoDetectado, ParametrosRadar
+from radar.models import JuegoDetectado, MapeoConsola, ParametrosRadar
 
 
 class Command(BaseCommand):
@@ -72,13 +74,35 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('Todo lo publicado se puede comprar.'))
             return
 
+        if not options['reparar']:
+            # El motivo, agrupado. Un fallo de configuracion afecta a todos los
+            # juegos a la vez, asi que listarlos uno por uno llena la pantalla
+            # sin decir nada nuevo -- y sin el motivo al lado, la lista no
+            # sirve para arreglar nada.
+            motivos = Counter()
+            for juego in rotos:
+                try:
+                    juego.plan_de_publicacion(parametros)
+                except ValueError as exc:
+                    motivos[str(exc)] += 1
+                else:
+                    motivos['Se puede publicar: corre radar_revisar --reparar'] += 1
+            self.stdout.write('')
+            for motivo, veces in motivos.most_common():
+                self.stdout.write(self.style.ERROR('  %s juego(s): %s' % (veces, motivo)))
+            self.stdout.write('')
+            self.stdout.write('  Ejemplos: %s' % ', '.join(
+                j.titulo[:32] for j in rotos[:3]))
+            self.stdout.write('')
+            self.stdout.write(self.style.WARNING(
+                'Solo diagnostico. Cuando arregles lo de arriba: '
+                'manage.py radar_revisar --reparar'))
+            return
+
         arreglados, sin_arreglo = [], []
         for juego in rotos:
             etiqueta = '  #%s %s (producto %s)' % (
                 juego.pk, juego.titulo[:50], juego.producto_publicado_id)
-            if not options['reparar']:
-                self.stdout.write(etiqueta)
-                continue
             try:
                 juego.publicar(parametros)
             except ValueError as exc:
@@ -91,13 +115,6 @@ class Command(BaseCommand):
             else:
                 arreglados.append(juego)
                 self.stdout.write(self.style.SUCCESS('%s -> arreglado' % etiqueta))
-
-        if not options['reparar']:
-            self.stdout.write('')
-            self.stdout.write(self.style.WARNING(
-                'Solo diagnostico. Para intentar arreglarlos: '
-                'manage.py radar_revisar --reparar'))
-            return
 
         if options['retirar'] and sin_arreglo:
             for juego, _motivo in sin_arreglo:
@@ -131,3 +148,20 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING('  %-32s SIN CONFIGURAR' % etiqueta))
             else:
                 self.stdout.write('  %-32s %s' % (etiqueta, valor))
+
+        # La consola no sale de Parametros sino de esta tabla, y es la causa
+        # mas facil de pasar por alto: viene sembrada con los nombres de las
+        # plataformas pero sin consola asignada.
+        self.stdout.write('')
+        self.stdout.write('Consolas por plataforma:')
+        mapeos = list(MapeoConsola.objects.select_related('consola', 'licencia'))
+        if not mapeos:
+            self.stdout.write(self.style.WARNING('  la tabla esta vacia'))
+            return
+        for m in mapeos:
+            if m.consola_id:
+                extra = ' (licencia propia: %s)' % m.licencia if m.licencia_id else ''
+                self.stdout.write('  %-16s -> %s%s' % (m.plataforma, m.consola, extra))
+            else:
+                self.stdout.write(self.style.WARNING(
+                    '  %-16s -> SIN ASIGNAR (esta plataforma se ignora)' % m.plataforma))

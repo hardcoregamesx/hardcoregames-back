@@ -475,17 +475,17 @@ class JuegoDetectado(models.Model):
         if self.precio_cuenta and not self.precio_venta:
             if parametros.licencia_primaria is None and parametros.licencia_secundaria is None:
                 return (
-                    '"%s" solo tiene precio de cuenta, y en Parametros del radar no hay '
-                    'licencia primaria ni secundaria. Sin ellas no hay nada que publicar: '
-                    'configuralas, o ponle tambien precio de codigo.' % self.titulo)
+                    'Solo tiene precio de cuenta, y en Parametros del radar no hay licencia '
+                    'primaria ni secundaria. Sin ellas no hay nada que publicar: '
+                    'configuralas, o ponle tambien precio de codigo.')
             return (
-                '"%s" solo tiene precio de cuenta, pero las plataformas en las que sale '
-                '("%s") se venden con licencia propia, que no admite cuentas. Ponle precio '
-                'de codigo.' % (self.titulo, self.plataformas or '?'))
+                'Solo tiene precio de cuenta, pero las plataformas en las que sale ("%s") se '
+                'venden con licencia propia, que no admite cuentas. Ponle precio de codigo.'
+                % (self.plataformas or '?'))
         return (
-            'La configuracion actual no produce ninguna variante para "%s" (%s consola(s), '
-            'licencia por defecto %s). Revisa las licencias en Parametros del radar.'
-            % (self.titulo, len(destinos), parametros.licencia_default or 'sin configurar'))
+            'La configuracion actual no produce ninguna variante (%s consola(s), licencia '
+            'por defecto %s). Revisa las licencias en Parametros del radar.'
+            % (len(destinos), parametros.licencia_default or 'sin configurar'))
 
     def variantes_vendibles(self):
         """Cuantas variantes de este juego puede comprar un cliente hoy.
@@ -500,6 +500,65 @@ class JuegoDetectado(models.Model):
             return 0
         return GameDetail.objects.filter(
             producto_id=self.producto_publicado_id, stock__gt=0, precio__gt=0).count()
+
+    def plan_de_publicacion(self, parametros=None):
+        """Que variantes habria que crear, sin escribir nada.
+
+        Esta separado de publicar() para poder preguntar "¿por que este juego
+        no se puede publicar?" sin tocar la base: publicar() lo usa para
+        validar, y radar_revisar para explicar. Una sola definicion de lo que
+        hace falta, en vez de dos que se desincronizan.
+
+        Devuelve (destinos, plan). Lanza ValueError con un mensaje legible
+        cuando falta algo por configurar.
+        """
+        parametros = parametros or ParametrosRadar.actuales()
+
+        if not self.precio_venta and not self.precio_cuenta:
+            raise ValueError(
+                'No tiene ningun precio. Ponle el de codigo, el de cuenta o los dos.')
+
+        destinos = self.consolas_publicacion(parametros)
+        if not destinos:
+            raise ValueError(
+                'Ninguna de sus plataformas ("%s") tiene consola asignada. Asignalas en '
+                'Consolas por plataforma, o pon una consola por defecto en Parametros '
+                'del radar.' % (self.plataformas or '?'))
+
+        licencia = self.licencia or parametros.licencia_default
+        if licencia is None:
+            raise ValueError('Falta la licencia por defecto en Parametros del radar.')
+
+        if parametros.tipo_producto is None:
+            raise ValueError('Falta el tipo de producto por defecto en Parametros del radar.')
+
+        # Con stock 0 la variante existe pero la ficha la ignora: el frontend
+        # solo mira las variantes con stock y precio, y sin ninguna cae al modo
+        # "producto fisico" -- precio $0 y boton de "solicitar orden de compra".
+        if parametros.stock_publicacion < 1:
+            raise ValueError(
+                'El stock de publicacion esta en %s. Con 0 el producto sale sin precio y sin '
+                'boton de compra. Ponlo en al menos 1 en Parametros del radar.'
+                % parametros.stock_publicacion)
+
+        plan = []
+        for cons, licencia_propia in destinos:
+            if licencia_propia is not None:
+                # Plataforma con licencia propia (el caso de PC, que no se
+                # vende como cuenta): una sola variante, al precio de codigo.
+                if self.precio_venta:
+                    plan.append((licencia_propia, self.precio_venta, cons))
+                continue
+            if self.precio_venta:
+                plan.append((licencia, self.precio_venta, cons))
+            if self.precio_cuenta:
+                for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
+                    if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
+                        plan.append((lic, self.precio_cuenta, cons))
+
+        if not plan:
+            raise ValueError(self._motivo_sin_variantes(parametros, destinos))
+        return destinos, plan
 
     def publicar(self, parametros=None):
         """Crea (o actualiza) el producto real del catalogo para este juego.
@@ -528,56 +587,7 @@ class JuegoDetectado(models.Model):
         from products.models import GameDetail, Products
 
         parametros = parametros or ParametrosRadar.actuales()
-
-        if not self.precio_venta and not self.precio_cuenta:
-            raise ValueError(
-                '"%s" no tiene ningun precio. Ponle el de codigo, el de cuenta o los dos.'
-                % self.titulo)
-
-        destinos = self.consolas_publicacion(parametros)
-        if not destinos:
-            raise ValueError(
-                'Falta decir a que consola corresponden las plataformas de %s ("%s"). '
-                'Configuralo en Consolas por plataforma, o pon una consola por defecto en '
-                'Parametros del radar.' % (self.get_tienda_display(), self.plataformas or '?')
-            )
-
-        licencia = self.licencia or parametros.licencia_default
-        if licencia is None:
-            raise ValueError('Falta la licencia por defecto. Configurala en Parametros del radar.')
-
-        if parametros.tipo_producto is None:
-            raise ValueError('Falta el tipo de producto por defecto. Configuralo en Parametros del radar.')
-
-        # Con stock 0 la variante existe pero la ficha la ignora: el frontend
-        # solo mira las variantes con stock y precio, y sin ninguna cae al modo
-        # "producto fisico" -- precio $0 y boton de "solicitar orden de compra".
-        if parametros.stock_publicacion < 1:
-            raise ValueError(
-                'El stock de publicacion esta en %s. Con 0 el producto sale sin precio y sin '
-                'boton de compra. Ponlo en al menos 1 en Parametros del radar.'
-                % parametros.stock_publicacion)
-
-        # Que variantes hay que crear. Se calcula ANTES de tocar el catalogo: si
-        # la configuracion no produce ninguna, crear el producto solo deja una
-        # ficha muerta en la tienda (ver _motivo_sin_variantes).
-        plan = []
-        for cons, licencia_propia in destinos:
-            if licencia_propia is not None:
-                # Plataforma con licencia propia (el caso de PC, que no se
-                # vende como cuenta): una sola variante, al precio de codigo.
-                if self.precio_venta:
-                    plan.append((licencia_propia, self.precio_venta, cons))
-                continue
-            if self.precio_venta:
-                plan.append((licencia, self.precio_venta, cons))
-            if self.precio_cuenta:
-                for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
-                    if lic is not None and not (self.precio_venta and lic.pk == licencia.pk):
-                        plan.append((lic, self.precio_cuenta, cons))
-
-        if not plan:
-            raise ValueError(self._motivo_sin_variantes(parametros, destinos))
+        destinos, plan = self.plan_de_publicacion(parametros)
 
         # El modo reserva exige una fecha de lanzamiento futura. Se usa el dia
         # siguiente al fin de la promocion: mientras el producto este publicado
