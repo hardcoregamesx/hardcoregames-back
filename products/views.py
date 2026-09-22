@@ -806,6 +806,19 @@ def confirm_sale(request_data, transaction=None):
             descuento_item = calculo_item.get('descuento') or 0
             product_selected = combination_selected.producto
 
+            # Un producto sobre pedido no tiene cuenta cargada: se compra
+            # cuando el cliente paga. Si aun asi llega como contado -- carrito
+            # viejo, ficha cacheada, alguien llamando la API a mano -- el
+            # camino de entrega inmediata leeria una cuenta que no existe y
+            # mandaria el correo con usuario y contrasena en blanco, habiendo
+            # cobrado igual. Se trata como reserva, que es lo que realmente es:
+            # el mismo dinero (el anticipo es el precio completo) y el pedido
+            # queda esperando en Planes de pago.
+            if (modo_pago == 'contado' and combination_selected.reserva_activa
+                    and combination_selected.cuenta_id is None
+                    and getattr(product_selected, 'sobre_pedido', False)):
+                modo_pago = 'reserva'
+
             if modo_pago == 'reserva':
                 # Reserva: no se entrega nada, no se toca stock ni se crea
                 # SaleDetail -- solo se congela el precio y se crea el plan.
