@@ -2235,7 +2235,7 @@ TRANSFERENCIA_BREB_KEY_VARIABLE = "transferencia_breb_key"
 # quedo enlazado a esta llave. No toca TRANSFERENCIA_BREB_KEY_VARIABLE ni el
 # fallback de arriba: el resto de checkouts por transferencia sigue igual.
 ZELDA_RESERVA_COMBINATION_ID = 6565
-ZELDA_RESERVA_BREB_KEY = "@3106266045"
+ZELDA_RESERVA_BREB_KEY = "@3016266045"
 
 
 def _get_breb_key(cart_items=None):
