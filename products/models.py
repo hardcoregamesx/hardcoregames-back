@@ -423,6 +423,30 @@ class CouponRule(models.Model):
     def __str__(self):
         return f'{self.get_rule_type_display()} [{self.get_operator_display()}]'
 
+    def _total_sin_regalo(self, cart_total, cart_items):
+        """Monto de la compra sin contar lo que el propio cupon regala.
+
+        Un cupon que restringe su descuento a ciertas combinaciones
+        (game_details) las esta usando como premio: "compra X y llevate Y".
+        Si el umbral se midiera sobre el carrito completo, el precio del
+        premio ayudaria a alcanzarlo, y bastaria con agregarlo al carrito
+        para cumplir la condicion que supuestamente lo desbloquea -- con un
+        premio de $199.990 y un umbral de $99.000, cualquier juego suelto
+        basta. Por eso el umbral mira solo lo que el cliente si paga.
+
+        Un cupon sin game_details descuenta sobre todo el carrito: no hay
+        premio que separar y el total queda igual que siempre, asi que los
+        cupones que ya existen no cambian de comportamiento.
+        """
+        gift_ids = set(self.coupon.game_details.values_list('id_game_detail', flat=True))
+        if not gift_ids:
+            return cart_total
+        gift_total = sum(
+            item.get('pago_hoy', 0) for item in cart_items
+            if item.get('id_combination') in gift_ids
+        )
+        return cart_total - gift_total
+
     def evaluate(self, user, cart_total, cart_items):
         """
         Evaluate this single rule.
@@ -438,14 +462,15 @@ class CouponRule(models.Model):
         # --- min_order_amount -------------------------------------------
         if rt == self.RuleType.MIN_ORDER_AMOUNT:
             amount = v.get('amount', 0)
+            purchase_total = self._total_sin_regalo(cart_total, cart_items)
             if op == self.Operator.GTE:
-                if cart_total >= amount:
+                if purchase_total >= amount:
                     return True, ''
                 return False, f'El monto mínimo de la orden debe ser {amount}.'
             if op == self.Operator.BETWEEN:
                 min_val = v.get('min', 0)
                 max_val = v.get('max', float('inf'))
-                if min_val <= cart_total <= max_val:
+                if min_val <= purchase_total <= max_val:
                     return True, ''
                 return False, f'El monto de la orden debe estar entre {min_val} y {max_val}.'
 
