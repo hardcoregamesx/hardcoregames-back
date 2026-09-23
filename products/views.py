@@ -2229,11 +2229,23 @@ TRANSFERENCIA_WEBHOOK_SECRET = os.getenv("TRANSFERENCIA_WEBHOOK_SECRET", "")
 TRANSFERENCIA_BREB_KEY_DEFAULT = os.getenv("TRANSFERENCIA_BREB_KEY", "@nequimil688")
 TRANSFERENCIA_BREB_KEY_VARIABLE = "transferencia_breb_key"
 
+# Reserva de Zelda (frontend-v2 /zelda, GameDetail id_game_detail=6565):
+# cobra a una llave Bre-B propia, distinta de la del resto de la tienda --
+# pedido explicito del negocio (23/09/2026), el verificador de pagos ya
+# quedo enlazado a esta llave. No toca TRANSFERENCIA_BREB_KEY_VARIABLE ni el
+# fallback de arriba: el resto de checkouts por transferencia sigue igual.
+ZELDA_RESERVA_COMBINATION_ID = 6565
+ZELDA_RESERVA_BREB_KEY = "@3106266045"
 
-def _get_breb_key():
+
+def _get_breb_key(cart_items=None):
     """La llave se edita desde el admin (Variables de sistema) para poder
     cambiar de cuenta bancaria sin tocar código ni redesplegar. Se lee en
-    caliente en cada checkout -- no hay caché, es una sola fila."""
+    caliente en cada checkout -- no hay caché, es una sola fila. Excepcion:
+    la reserva de Zelda usa su propia llave fija (ver ZELDA_RESERVA_BREB_KEY),
+    nunca la de VariablesSistema."""
+    if cart_items and any(item.get("id_combination") == ZELDA_RESERVA_COMBINATION_ID for item in cart_items):
+        return ZELDA_RESERVA_BREB_KEY
     row = VariablesSistema.objects.filter(
         nombre_variable=TRANSFERENCIA_BREB_KEY_VARIABLE, estado=True
     ).first()
@@ -2361,7 +2373,7 @@ def transferencia_create(request):
     return JsonResponse({
         "transactionId": order_id,
         "amount": calculated_amount,
-        "breBKey": _get_breb_key(),
+        "breBKey": _get_breb_key(cart_items),
         "deadlineAt": registered.get("deadline_at"),
     }, status=200)
 
