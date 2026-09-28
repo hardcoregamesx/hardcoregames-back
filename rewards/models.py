@@ -61,9 +61,23 @@ class Roulette(models.Model):
     """Una rueda configurable. Puede haber mas de una activa a la vez: la
     ruleta VIP (`requires_membership=True`) reusa esta misma tabla en vez de
     duplicar el modelo, distinguida por ese flag y con tope mensual en lugar
-    de diario."""
+    de diario. Entre ruletas NO-VIP la que distingue es `slug`: la normal de
+    siempre es 'default' (así es como la resuelve GET /rewards/roulette sin
+    parámetros); una ruleta temática nueva (ej. una campaña) necesita su
+    propio slug único antes de poder activarse, o pisaría a la que ya esté
+    activa con ese mismo slug."""
 
     name = models.CharField(max_length=100)
+    slug = models.SlugField(
+        max_length=50, unique=True,
+        help_text='Identificador único. La ruleta normal de siempre usa "default" — no lo cambies. '
+                   'Para una ruleta temática nueva, usa algo descriptivo (ej. "zelda-ocarina").',
+    )
+    notice = models.CharField(
+        max_length=280, null=True, blank=True,
+        help_text='Leyenda opcional bajo la rueda para condiciones puntuales de esta ruleta '
+                   '(ej. "premios solo para quien compró X"). Vacío = no se muestra nada.',
+    )
     is_active = models.BooleanField(default=True)
     cost_points = models.IntegerField(default=0)
     max_spins_per_day = models.IntegerField(null=True, blank=True)
