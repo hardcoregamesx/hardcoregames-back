@@ -8,6 +8,7 @@ calma. "Publicar" ya crea el producto real y lo pone a la venta.
 from collections import Counter
 
 from django.contrib import admin, messages
+from django.contrib.admin import helpers
 from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import redirect
 from django.urls import path, reverse
@@ -409,6 +410,31 @@ class JuegoDetectadoAdmin(ErroresVisiblesMixin, admin.ModelAdmin):
     @admin.action(description='PUBLICAR TODOS los que tengan precio (ignora la seleccion)')
     def accion_publicar_todos(self, request, queryset):
         self._publicar_con_precio(request)
+    # Django bloquea cualquier accion sin casillas marcadas, antes de que la
+    # accion llegue a correr. Esta decia "ignora la seleccion" y era mentira:
+    # sin marcar nada respondia "Se deben seleccionar elementos". Con esta
+    # marca, response_action la deja pasar.
+    accion_publicar_todos.sin_seleccion = True
+
+    def changelist_view(self, request, extra_context=None):
+        """Deja correr sin seleccion las acciones marcadas para ello.
+
+        No vale con tocar `response_action`: Django ni siquiera llega ahi. El
+        listado comprueba la seleccion antes, y sin casillas marcadas responde
+        "Se deben seleccionar elementos" y no llama a la accion. Por eso la
+        accion decia "ignora la seleccion" y aun asi no corria.
+
+        Poner el precio ya es la decision de vender; obligar a recorrer la
+        lista otra vez marcando casillas es hacer el trabajo dos veces, que es
+        justo lo que el boton verde vino a evitar.
+        """
+        if request.method == 'POST' and 'index' in request.POST:
+            entrada = self.get_actions(request).get(request.POST.get('action'))
+            sin_marcar = not request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
+            if entrada and sin_marcar and getattr(entrada[0], 'sin_seleccion', False):
+                entrada[0](self, request, self.get_queryset(request))
+                return redirect(request.get_full_path())
+        return super().changelist_view(request, extra_context)
 
     @admin.action(description='Solo preparar (precios y region, sin publicar)')
     def accion_aprobar(self, request, queryset):
