@@ -190,6 +190,12 @@ def ofertas(region, sesion=None, log=None, tope=8000):
             oferta, _ = _parsear_precio(precio.get('discountedPrice'))
             if oferta is None:
                 continue
+            # La rejilla de "ofertas" tambien trae juegos cuyo precio con
+            # descuento es el mismo de lista. No son ofertas: entran al radar
+            # como oportunidades de margen cero y ensucian la pantalla.
+            if lista is not None and oferta >= lista:
+                descartadas['sin descuento real'] += 1
+                continue
             descuento = re.sub(r'[^0-9]', '', precio.get('discountText') or '') or '0'
             encontradas.append({
                 'id_externo': prod.get('id'),
@@ -210,7 +216,7 @@ def ofertas(region, sesion=None, log=None, tope=8000):
         offset += PAGINA
 
     if log:
-        log('  %s: %s juegos (descartados %s DLC, pases y similares)'
+        log('  %s: %s juegos (descartados %s: DLC, pases y entradas sin descuento real)'
             % (region, len(encontradas), sum(descartadas.values())))
     return encontradas
 

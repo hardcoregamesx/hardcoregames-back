@@ -118,8 +118,16 @@ def _con_reintentos(descripcion, hacer, log=None):
 def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None, log=None):
     """Devuelve la lista de ofertas vigentes de una region.
 
-    Pagina ordenando por descuento descendente y corta cuando el descuento baja
-    del minimo pedido, que es justo donde termina el catalogo de ofertas.
+    Se pide ordenado por descuento descendente, pero **el orden no se cumple**
+    y no se puede usar para saber donde termina la lista. Medido en tr-TR el
+    30/09/2026: 966 ofertas, 21 rupturas del orden, y el primer 0% aparece en
+    la posicion 626 -- con items del 10% todavia en las posiciones 637, 640 y
+    643.
+
+    Antes se cortaba al ver el primer item bajo el minimo, dando por hecho ese
+    orden. El resultado era perder un tercio del catalogo cada dia, y un
+    tercio distinto cada vez. Ahora se recorren todas las paginas y se filtra
+    item por item; `max_paginas` queda solo como tope de seguridad.
     """
     if region not in REGIONES:
         raise ErrorTienda('Region desconocida: %s' % region)
@@ -130,6 +138,7 @@ def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None
     continuacion = None
     encontradas = []
     vistos = set()
+    descartadas = 0
 
     for pagina in range(max_paginas):
         cuerpo = {
@@ -173,13 +182,15 @@ def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None
         if not disponibilidades:
             break
 
-        corto = False
         for disp in disponibilidades:
             precio = disp.get('price') or {}
             descuento = precio.get('discountPercentage') or 0.0
-            if descuento < descuento_minimo:
-                corto = True
-                break
+            # Un 0% no es una oferta, aunque el piso configurado sea 0. Sin
+            # esta linea, bajar el minimo en Parametros del radar mete en el
+            # radar juegos a precio completo.
+            if descuento <= 0 or descuento < descuento_minimo:
+                descartadas += 1
+                continue
 
             big_id = disp.get('productId')
             if not big_id or big_id in vistos:
@@ -210,9 +221,12 @@ def ofertas(region, max_paginas=60, descuento_minimo=DESCUENTO_PISO, sesion=None
             log('  %s pagina %s: %s ofertas acumuladas' % (region, pagina + 1, len(encontradas)))
 
         continuacion = canal.get('encodedCT')
-        if corto or not continuacion:
+        if not continuacion:
             break
 
+    if log and descartadas:
+        log('  %s: %s entradas descartadas por no llegar al %s%% de descuento'
+            % (region, descartadas, descuento_minimo))
     return encontradas
 
 

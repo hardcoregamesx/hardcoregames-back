@@ -197,10 +197,15 @@ class Command(BaseCommand):
         for clave, entrada in cruzados.items():
             for region in entrada['regiones']:
                 vistos[region].add(clave)
-        precios_fuera, juegos_fuera = retirar_ofertas_desaparecidas('PS', vistos)
+        precios_fuera, juegos_fuera, saltadas = retirar_ofertas_desaparecidas('PS', vistos)
         if precios_fuera or juegos_fuera:
             self.stdout.write('Ya no estan en oferta: %s precios y %s juegos salieron del radar.'
                               % (precios_fuera, juegos_fuera))
+        for region, vistos_region, guardados in saltadas:
+            self.stderr.write(self.style.WARNING(
+                '  %s: la tienda devolvio %s ofertas y hay %s guardadas. Parece una lectura '
+                'a medias, asi que no se borro nada de esa region.'
+                % (region, vistos_region, guardados)))
 
         return len(cruzados), guardados
 

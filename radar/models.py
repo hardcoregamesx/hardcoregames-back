@@ -1276,15 +1276,25 @@ def retirar_ofertas_desaparecidas(tienda, vistos_por_region):
     sus precios se dejan quietos -- vaciar el radar por un corte de red seria
     peor que la enfermedad.
 
-    Devuelve (precios_borrados, juegos_borrados).
+    Devuelve (precios_borrados, juegos_borrados, regiones_saltadas).
     """
     from radar.models import ComboJuego, JuegoDetectado, PrecioRegional
 
     precios_borrados = 0
+    saltadas = []
     for region, vistos in vistos_por_region.items():
-        viejos = PrecioRegional.objects.filter(juego__tienda=tienda, region=region)
-        if vistos:
-            viejos = viejos.exclude(juego__id_externo__in=vistos)
+        guardados = PrecioRegional.objects.filter(juego__tienda=tienda, region=region)
+        total_guardado = guardados.count()
+
+        # Guardarrail: si la corrida vio mucho menos de lo que hay guardado,
+        # lo mas probable es que la tienda respondiera a medias, no que medio
+        # catalogo dejara de estar en oferta de un dia para otro. Borrar sobre
+        # una lectura parcial vacia el radar, y recuperarlo cuesta un dia.
+        if total_guardado and len(vistos) * 2 < total_guardado:
+            saltadas.append((region, len(vistos), total_guardado))
+            continue
+
+        viejos = guardados.exclude(juego__id_externo__in=vistos) if vistos else guardados
         cantidad = viejos.count()
         if cantidad:
             viejos.delete()
@@ -1316,4 +1326,4 @@ def retirar_ofertas_desaparecidas(tienda, vistos_por_region):
     juegos_borrados = len(candidatos)
     if candidatos:
         JuegoDetectado.objects.filter(pk__in=candidatos).delete()
-    return precios_borrados, juegos_borrados
+    return precios_borrados, juegos_borrados, saltadas

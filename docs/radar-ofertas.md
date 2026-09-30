@@ -217,12 +217,19 @@ vender a perdida. Por eso el comando falla ruidosamente en vez de guardar una co
 
 **Listado de ofertas** — `POST https://emerald.xboxservices.com/xboxcomfd/browse?locale=<locale>`
 
+- **El orden que se pide no se cumple, y no sirve para saber donde termina la lista.**
+  Se pide `DiscountPercentage desc`, pero medido en `tr-TR` el 30/09/2026: 966 entradas
+  revisadas, 21 rupturas del orden, y el primer 0% en la posicion **626** -- con items del 10%
+  todavia en las posiciones 637, 640 y 643. El cliente cortaba al ver el primer item bajo el
+  minimo dando por hecho ese orden, y perdia un tercio del catalogo cada dia, un tercio
+  distinto cada vez. Ahora se recorren todas las paginas y se filtra item por item.
+- La lista de "ofertas" **incluye entradas con 0% de descuento**. El cliente las descarta
+  siempre, aunque el minimo configurado en Parametros sea 0: un 0% no es una oferta, y dejarlas
+  entrar pone en el radar juegos a precio completo.
 - El mercado lo fija `locale`, **no** un parametro `market`.
 - Cabecera `X-MS-API-Version: 1.1` obligatoria (con `1.0` responde 405; sin ella, 400).
 - `Filters` va en base64 de un JSON. El filtro nativo `Price=OnSale` **solo funciona en
-  `en-US`**; en los demas mercados se ignora. Por eso se ordena por `DiscountPercentage desc`
-  y se corta al llegar al 10%, que es el piso que lista Microsoft. Verificado que las dos vias
-  dan el mismo conjunto en `en-US` (957 ofertas).
+  `en-US`**; en los demas mercados se ignora.
 - La paginacion va con `encodedCT`, que se reinyecta en `EncodedCT`.
 
 **Precio por producto** — `GET https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=...&market=CO&languages=es-co`
