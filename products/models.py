@@ -348,6 +348,12 @@ class Coupon(models.Model):
                 license_ids.add(v['licencia'])
             if product_ids:
                 specs.append((product_ids, license_ids))
+        # match_all_variants: each combination picked in Restricciones also
+        # stands for every combination of the same product and licencia
+        # (e.g. any duration of YouTube Premium "código").
+        if self.rules.filter(rule_type='match_all_variants').exists():
+            for producto_id, licencia_id in self.game_details.values_list('producto_id', 'licencia_id'):
+                specs.append(({producto_id}, {licencia_id}))
         return specs
 
     def is_restricted(self):
@@ -428,6 +434,7 @@ class CouponRule(models.Model):
         MAX_DISCOUNTED_ITEMS = 'max_discounted_items', 'Máximo de ítems con descuento'
         MATCHING_LICENSE_TO_ANCHOR = 'matching_license_to_anchor', 'Licencia del regalo debe igualar la licencia de la compra ancla'
         DISCOUNT_PRODUCTS  = 'discount_products',  'Producto con descuento (por producto/licencia)'
+        MATCH_ALL_VARIANTS = 'match_all_variants', 'Aplicar a todas las variantes (mismo producto y licencia)'
 
     class Operator(models.TextChoices):
         GTE     = 'gte',     'Mayor o igual (>=)'
@@ -453,7 +460,9 @@ class CouponRule(models.Model):
             '{"limit": 5} | {"days": [0,1,2,3,4]} | {"min": 10000, "max": 200000} | '
             '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo) | '
             '{"product_ids": [2], "license_ids": [3]} (discount_products: el descuento solo '
-            'aplica a ese producto, y a esas licencias si se indican; license_ids es opcional)'
+            'aplica a ese producto, y a esas licencias si se indican; license_ids es opcional) | '
+            '{"all": true} (match_all_variants: cada combinación elegida en Restricciones '
+            'cubre todas las combinaciones con su mismo producto y licencia)'
         ),
     )
 
@@ -631,6 +640,12 @@ class CouponRule(models.Model):
         # Coupon.item_matches). Whether the cart has a matching item is
         # checked once in Coupon.validate_coupon.
         elif rt == self.RuleType.DISCOUNT_PRODUCTS:
+            return True, ''
+
+        # --- match_all_variants -----------------------------------------
+        # Also not a gate: it widens which items count as the ones picked in
+        # Restricciones (see Coupon._discount_product_specs).
+        elif rt == self.RuleType.MATCH_ALL_VARIANTS:
             return True, ''
 
         # Fallback – unknown / unhandled combination passes silently
