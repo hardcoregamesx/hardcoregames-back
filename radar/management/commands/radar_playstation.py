@@ -24,6 +24,7 @@ from radar.models import (
     PrecioRegional,
     TasaCambio,
     TasaTienda,
+    buscador_de_catalogo,
     retirar_ofertas_desaparecidas,
 )
 from radar.tiendas import playstation
@@ -146,7 +147,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('Modo --dry-run: no se escribio nada.'))
             return len(cruzados), 0
 
-        catalogo = self._catalogo_propio()
+        catalogo = buscador_de_catalogo(normalizar, 'PS', parametros)
         guardados = 0
 
         for indice, (margen, clave, region, costo) in enumerate(candidatos):
@@ -172,7 +173,7 @@ class Command(BaseCommand):
                         'precio_co': (base['precio_lista'] or 0) * usd_mercado,
                         'precio_co_oferta': (base['precio_oferta'] or 0) * usd_mercado,
                         'comprable_co': True,
-                        'producto_existente_id': catalogo.get(normalizar(base['titulo'])),
+                        'producto_existente_id': catalogo(base['titulo']),
                     },
                 )
                 for reg, oferta in entrada['regiones'].items():
@@ -231,16 +232,6 @@ class Command(BaseCommand):
         self.stdout.write('-' * 80)
         for margen, clave, region, costo in filas:
             self.stdout.write('%-46s %-4s %12s %12s' % (clave[:46], region, costo, margen))
-
-    def _catalogo_propio(self):
-        try:
-            from products.models import Products
-            return {normalizar(t): pid
-                    for pid, t in Products.objects.values_list('id_product', 'title') if t}
-        except Exception as exc:
-            self.stderr.write(self.style.WARNING('No se pudo leer el catalogo propio: %s' % exc))
-            return {}
-
 
 def _a_pesos(valor, moneda, tasas):
     if valor is None or moneda not in tasas:

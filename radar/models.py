@@ -805,6 +805,19 @@ class JuegoDetectado(models.Model):
                 'El producto #%s del catalogo ya no existe. Quita la marca de "usar la ficha '
                 'del catalogo" para publicarlo como producto nuevo.' % self.producto_existente_id)
 
+        # Ultima red antes de tocarle el precio a un producto tuyo: que sea de
+        # esta tienda. El cruce por titulo ya lo comprueba, pero un
+        # producto_existente_id viejo -- guardado antes de ese arreglo, o
+        # puesto a mano -- se saltaria la comprobacion. Se vio con Sifu: una
+        # oferta de Xbox le puso descuento a la ficha de PlayStation.
+        familia = consolas_de_tienda(self.tienda, parametros)
+        suyas = set(producto.consola.values_list('id_console', flat=True))
+        if familia and not (suyas & familia):
+            raise ValueError(
+                'El producto #%s ("%s") no es de %s: sus consolas no coinciden con las de esa '
+                'tienda. No se le toca el precio.'
+                % (producto.id_product, producto.title[:40], self.get_tienda_display()))
+
         # Que precio le toca a cada licencia. Una cuenta no vale lo que un
         # codigo, y este producto puede tener las dos.
         por_licencia = {}
@@ -1327,3 +1340,75 @@ def retirar_ofertas_desaparecidas(tienda, vistos_por_region):
     if candidatos:
         JuegoDetectado.objects.filter(pk__in=candidatos).delete()
     return precios_borrados, juegos_borrados, saltadas
+
+
+# Que plataformas manda cada tienda. Sirven para saber que consolas del
+# catalogo pertenecen a cada una.
+PLATAFORMAS_POR_TIENDA = {
+    'XBOX': ('xboxone', 'xboxseriesx', 'xcloud', 'pc', 'handheld'),
+    'PS': ('ps4', 'ps5'),
+}
+
+
+def consolas_de_tienda(tienda, parametros=None):
+    """Los ids de consola del catalogo que corresponden a una tienda.
+
+    Sale de Consolas por plataforma, no de una lista fija: si manana se
+    agrega una consola, basta con asignarla ahi.
+    """
+    parametros = parametros or ParametrosRadar.actuales()
+    mapa = MapeoConsola.mapa()
+    ids = set()
+    for nombre in PLATAFORMAS_POR_TIENDA.get(tienda, ()):
+        par = mapa.get(nombre)
+        if par:
+            ids.add(par[0].pk)
+    defecto = parametros.consola_xbox if tienda == 'XBOX' else parametros.consola_ps
+    for consola in (parametros.consola_ambas(tienda), defecto):
+        if consola is not None:
+            ids.add(consola.pk)
+    return ids
+
+
+def buscar_en_catalogo(normalizar, tienda, parametros=None):
+    """Devuelve una funcion titulo -> id del producto propio, o None.
+
+    Cruzar solo por titulo es lo que estaba mal y costo dinero: el catalogo
+    tiene el mismo juego para varias consolas, y una oferta de Xbox se
+    emparejaba con la ficha de PlayStation. Se vio con Sifu y con Ninja Gaiden
+    4, los dos fichas de PS a las que se les puso un descuento calculado con
+    el costo de comprarlos en Xbox.
+
+    Ademas, un diccionario titulo -> id se queda con UNO solo de los productos
+    que comparten titulo, y cual depende del orden en que vengan. Aqui se
+    guardan todos los candidatos y se elige el que comparte consola con la
+    tienda de la oferta.
+
+    Si ninguno la comparte -- o si el producto no declara consolas, que pasa
+    en una parte del catalogo -- no hay cruce. Preferir el silencio: un cruce
+    equivocado le pone el precio de otra tienda a un producto que si vendes.
+    """
+    from products.models import Consoles, Products
+
+    familia = consolas_de_tienda(tienda, parametros)
+    if not familia:
+        return lambda titulo: None
+
+    candidatos = {}
+    consolas_por_producto = {}
+    relacion = Products.consola.through.objects.values_list('products_id', 'consoles_id')
+    for producto_id, consola_id in relacion:
+        consolas_por_producto.setdefault(producto_id, set()).add(consola_id)
+
+    for pid, titulo in Products.objects.values_list('id_product', 'title'):
+        if not titulo:
+            continue
+        candidatos.setdefault(normalizar(titulo), []).append(pid)
+
+    def buscar(titulo):
+        for pid in candidatos.get(normalizar(titulo), ()):
+            if consolas_por_producto.get(pid, set()) & familia:
+                return pid
+        return None
+
+    return buscar

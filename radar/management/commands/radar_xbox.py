@@ -25,6 +25,7 @@ from radar.models import (
     PrecioRegional,
     TasaCambio,
     TasaTienda,
+    buscador_de_catalogo,
     retirar_ofertas_desaparecidas,
 )
 from radar.tiendas import xbox
@@ -246,7 +247,7 @@ class Command(BaseCommand):
             MapeoConsola.objects.create(plataforma=nueva)
             self.stdout.write('  plataforma nueva detectada: %s (asignale consola en el admin)' % nueva)
 
-        catalogo = self._catalogo_propio()
+        catalogo = buscador_de_catalogo(normalizar, 'XBOX', parametros)
         guardados = 0
 
         with transaction.atomic():
@@ -270,7 +271,7 @@ class Command(BaseCommand):
                         'precio_co': _dec(ref.get('precio_lista')),
                         'precio_co_oferta': _dec(ref.get('precio_oferta')),
                         'comprable_co': bool(ref),
-                        'producto_existente_id': catalogo.get(normalizar(titulo)),
+                        'producto_existente_id': catalogo(titulo),
                     },
                 )
 
@@ -306,19 +307,6 @@ class Command(BaseCommand):
                 % (region, vistos_region, guardados)))
 
         return len(fichas), guardados
-
-    def _catalogo_propio(self):
-        """Titulo normalizado -> id del producto que ya vendes."""
-        try:
-            from products.models import Products
-            return {
-                normalizar(t): pid
-                for pid, t in Products.objects.values_list('id_product', 'title')
-                if t
-            }
-        except Exception as exc:
-            self.stderr.write(self.style.WARNING('No se pudo leer el catalogo propio: %s' % exc))
-            return {}
 
     def _resumen(self, fichas, por_region, referencia, parametros):
         """Vista rapida de los mejores candidatos, para --dry-run."""
