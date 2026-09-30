@@ -700,6 +700,16 @@ class JuegoDetectado(models.Model):
         producto = None
         if self.producto_publicado_id:
             producto = Products.objects.filter(id_product=self.producto_publicado_id).first()
+            # Si lo que estaba publicado era una ficha TUYA y ahora toca un
+            # producto aparte -- porque dejo de cruzar, o porque se desmarco
+            # "usar la ficha del catalogo" -- esa ficha no se puede
+            # reutilizar. Seguir por aqui le cambiaria el titulo y la imagen,
+            # la marcaria como sobre pedido y le borraria las variantes con
+            # stock real para poner las del radar. Se le devuelve su precio y
+            # se empieza de cero con un producto nuevo.
+            if producto is not None and not producto.sobre_pedido:
+                self._retirar_de_ficha_existente()
+                producto = None
 
         if producto is None:
             producto = Products.objects.create(
