@@ -166,8 +166,63 @@ class PrecioRegionalInline(admin.TabularInline):
         return False
 
 
+class ErroresVisiblesMixin(object):
+    """Hace visibles los errores del listado editable.
+
+    Cuando una pantalla con columnas editables falla al guardar, Django
+    escribe "por favor corrija los errores" y marca el campo culpable. Pero si
+    el error cae en un campo OCULTO -- el mas comun: la fila ya no existe --
+    no hay nada que marcar, y el usuario ve el aviso rojo sobre una pantalla
+    sin un solo error senalado. Imposible de resolver mirando.
+
+    Pasa de verdad y cada vez mas: el radar borra solas las ofertas que ya no
+    estan en la tienda, asi que basta con tener la pantalla abierta mientras
+    corre la tarea de la manana para que al guardar una fila haya dejado de
+    existir.
+
+    Este mixin saca esos errores a mensajes con el nombre del juego, para que
+    se entienda que paso y que hacer.
+    """
+
+    def changelist_view(self, request, extra_context=None):
+        respuesta = super(ErroresVisiblesMixin, self).changelist_view(request, extra_context)
+        # En un guardado correcto el admin redirige y no hay contexto que mirar.
+        contexto = getattr(respuesta, 'context_data', None) or {}
+        cl = contexto.get('cl')
+        formset = getattr(cl, 'formset', None)
+        if not formset or not getattr(formset, 'errors', None):
+            return respuesta
+
+        desaparecidas = 0
+        otros = []
+        for indice, errores in enumerate(formset.errors):
+            if not errores:
+                continue
+            try:
+                etiqueta = str(formset.forms[indice].instance)
+            except Exception:
+                etiqueta = 'fila %s' % (indice + 1)
+            for campo, mensajes in errores.items():
+                # El pk es un campo oculto: su error es el que no se ve.
+                if campo in ('id', 'pk', '__all__') or campo == formset.model._meta.pk.name:
+                    desaparecidas += 1
+                else:
+                    otros.append('%s - %s: %s' % (etiqueta, campo, '; '.join(mensajes)))
+
+        if desaparecidas:
+            self.message_user(
+                request,
+                '%s de las filas que intentaste guardar ya no existen: el radar las retiro '
+                'porque salieron de oferta. Recarga la pagina y vuelve a escribir los precios '
+                'que falten; los de las demas filas no se guardaron.' % desaparecidas,
+                messages.WARNING)
+        for mensaje in otros[:8]:
+            self.message_user(request, mensaje, messages.ERROR)
+        return respuesta
+
+
 @admin.register(JuegoDetectado)
-class JuegoDetectadoAdmin(admin.ModelAdmin):
+class JuegoDetectadoAdmin(ErroresVisiblesMixin, admin.ModelAdmin):
     list_display = [
         'titulo', 'tienda', 'col_estado', 'col_precio_co', 'col_mejor', 'col_costo',
         'plataformas', 'col_venta', 'precio_venta', 'precio_cuenta', 'col_margen', 'col_vence', 'col_popularidad',
@@ -494,7 +549,7 @@ class ComboJuegoInline(admin.TabularInline):
 
 
 @admin.register(Combo)
-class ComboAdmin(admin.ModelAdmin):
+class ComboAdmin(ErroresVisiblesMixin, admin.ModelAdmin):
     """Armar, valorar y publicar combos.
 
     El flujo es el mismo de los juegos sueltos: el combo nace como borrador
