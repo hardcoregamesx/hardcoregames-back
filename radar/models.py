@@ -772,11 +772,24 @@ class JuegoDetectado(models.Model):
     def usa_ficha_propia(self):
         """Si lo publicado es un producto que ya estaba en el catalogo.
 
-        Se deduce en vez de guardarse en una bandera aparte: dos campos que
-        dicen lo mismo terminan contradiciendose.
+        Se mira `sobre_pedido` del producto, y no `producto_existente_id`
+        como hacia antes. Ese campo lo recalcula el radar en cada corrida, y
+        eso lo convertia en una trampa: al endurecer el cruce por consola,
+        Sifu dejo de cruzar y su `producto_existente_id` quedo vacio. La
+        deduccion vieja pasaba entonces a decir "no es ficha propia", y
+        retirar la oferta habria dejado en stock 0 un producto de PlayStation
+        con inventario real -- arreglando un precio y rompiendo una venta.
+
+        `sobre_pedido` no tiene ese problema: lo escribe la publicacion y no
+        lo recalcula nadie. Los productos que crea el radar lo llevan
+        siempre; las fichas del catalogo, nunca.
         """
-        return bool(self.producto_publicado_id
-                    and self.producto_publicado_id == self.producto_existente_id)
+        from products.models import Products
+
+        if not self.producto_publicado_id:
+            return False
+        producto = Products.objects.filter(id_product=self.producto_publicado_id).first()
+        return bool(producto and not producto.sobre_pedido)
 
     def _publicar_sobre_ficha_existente(self, parametros):
         """Pone la oferta en el producto que ya vendemos, sin crear otro.
