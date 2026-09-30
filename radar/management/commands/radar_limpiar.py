@@ -60,6 +60,13 @@ class Command(BaseCommand):
             if not juego.vence or juego.vence > limite:
                 continue
 
+            # Una ficha propia del catalogo NO se borra jamas. El radar solo
+            # le puso un descuento encima; el producto es tuyo, con su stock y
+            # sus cuentas, y se sigue vendiendo cuando la promocion termina.
+            if getattr(juego, 'usa_ficha_propia', None) and juego.usa_ficha_propia():
+                conservados += 1
+                continue
+
             pid = juego.producto_publicado_id
             # Ojo con los nombres: en SaleDetail la variante se llama
             # `combinacion`, y en ShoppingCar el campo `producto` apunta a
@@ -94,4 +101,5 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('Productos borrados del catalogo: %s' % borrados))
         if conservados:
             self.stdout.write(
-                '%s se conservan porque tuvieron ventas o estan en algun carrito.' % conservados)
+                '%s se conservan: tuvieron ventas, estan en un carrito, o son fichas tuyas '
+                'del catalogo a las que el radar solo les puso un descuento.' % conservados)

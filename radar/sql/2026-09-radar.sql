@@ -233,6 +233,11 @@ CREATE TABLE IF NOT EXISTS radar_tasatienda (
 -- products (ver la cabecera de radar/models.py).
 -- ---------------------------------------------------------------------------
 
+-- Si el juego ya esta en el catalogo, publicar la oferta sobre ESA ficha en
+-- vez de crear un producto nuevo (ver JuegoDetectado._publicar_sobre_ficha_existente).
+ALTER TABLE radar_juegodetectado
+  ADD COLUMN IF NOT EXISTS reusar_existente boolean NOT NULL DEFAULT true;
+
 CREATE TABLE IF NOT EXISTS radar_combo (
   id serial PRIMARY KEY,
   nombre varchar(120) NOT NULL,

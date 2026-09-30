@@ -62,6 +62,14 @@ RELLENO = {'edicion', 'edition', 'standard', 'estandar', 'ingles', 'english',
 
 def normalizar(titulo):
     """Normaliza un titulo para poder cruzarlo con el catalogo propio."""
+    # Los simbolos se quitan ANTES de unidecode, y ese orden es el arreglo.
+    # unidecode traduce los simbolos a letras -- (tm), (r), (c) -- asi que
+    # "NieR:Automata(tm) BECOME as GODS Edition" quedaba como
+    # "nier automata tm become as gods" y nunca cruzaba con el catalogo, que
+    # escribe el titulo sin el simbolo. Xbox los pone en casi todos los
+    # titulos, asi que esto solo se notaba como "el cruce no funciona".
+    for simbolo in ('™', '®', '©'):
+        titulo = (titulo or '').replace(simbolo, ' ')
     try:
         from unidecode import unidecode
         titulo = unidecode(titulo)

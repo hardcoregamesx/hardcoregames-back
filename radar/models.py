@@ -415,6 +415,12 @@ class JuegoDetectado(models.Model):
     )
     producto_publicado_id = models.IntegerField(null=True, blank=True)
     publicado_en = models.DateTimeField(null=True, blank=True)
+    reusar_existente = models.BooleanField(
+        default=True, verbose_name='Usar la ficha del catalogo',
+        help_text='Si este juego ya esta en el catalogo, al publicarlo se le pone el descuento '
+                  'a ESA ficha en vez de crear un producto nuevo. Asi se ofrece el stock que ya '
+                  'tienes. Desmarcalo para publicarlo aparte como sobre pedido.',
+    )
 
     visto_primero = models.DateTimeField(auto_now_add=True)
     visto_ultimo = models.DateTimeField(auto_now=True)
@@ -674,6 +680,13 @@ class JuegoDetectado(models.Model):
         from products.models import GameDetail, Products
 
         parametros = parametros or ParametrosRadar.actuales()
+
+        # Si ya lo vendemos, la oferta va sobre esa ficha. Crear un segundo
+        # producto con el mismo juego deja dos fichas compitiendo en el
+        # buscador y parte las resenas y el historial en dos.
+        if self.reusar_existente and self.producto_existente_id:
+            return self._publicar_sobre_ficha_existente(parametros)
+
         destinos, plan = self.plan_de_publicacion(parametros)
 
         # El modo reserva exige una fecha de lanzamiento futura. Se usa el dia
@@ -756,15 +769,110 @@ class JuegoDetectado(models.Model):
         self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado'])
         return producto
 
-    def despublicar(self):
-        """Saca el producto de circulacion sin borrar nada.
+    def usa_ficha_propia(self):
+        """Si lo publicado es un producto que ya estaba en el catalogo.
 
-        No se borra el producto: puede estar en el historial de una venta. Se
-        deja en stock 0, que es como el sitio ya marca "agotado".
+        Se deduce en vez de guardarse en una bandera aparte: dos campos que
+        dicen lo mismo terminan contradiciendose.
+        """
+        return bool(self.producto_publicado_id
+                    and self.producto_publicado_id == self.producto_existente_id)
+
+    def _publicar_sobre_ficha_existente(self, parametros):
+        """Pone la oferta en el producto que ya vendemos, sin crear otro.
+
+        Es un camino aparte del de publicar(), y la diferencia no es de forma
+        sino de riesgo. Ese producto es tuyo: tiene cuentas cargadas, stock
+        real, titulo y descripcion escritos a mano. Asi que aqui **no se toca
+        casi nada**:
+
+        - no se le cambia titulo, imagen ni descripcion;
+        - no se marca como sobre pedido ni se le activa la reserva -- hay
+          stock, se entrega de inmediato como cualquier otro producto;
+        - no se toca el stock;
+        - y el precio de la promocion va en `precio_descuento`, no en
+          `precio`. Ese campo existe justo para esto, y deja el precio normal
+          intacto: cuando la promocion vence basta con volverlo a cero y el
+          producto sigue vendiendose como antes. Escribir sobre `precio`
+          habria borrado para siempre el precio de lista.
+        """
+        from django.utils import timezone
+        from products.models import GameDetail, Products
+
+        producto = Products.objects.filter(id_product=self.producto_existente_id).first()
+        if producto is None:
+            raise ValueError(
+                'El producto #%s del catalogo ya no existe. Quita la marca de "usar la ficha '
+                'del catalogo" para publicarlo como producto nuevo.' % self.producto_existente_id)
+
+        # Que precio le toca a cada licencia. Una cuenta no vale lo que un
+        # codigo, y este producto puede tener las dos.
+        por_licencia = {}
+        licencia_codigo = self.licencia or parametros.licencia_default
+        if self.precio_venta and licencia_codigo is not None:
+            por_licencia[licencia_codigo.pk] = int(self.precio_venta)
+        if self.precio_cuenta:
+            for lic in (parametros.licencia_primaria, parametros.licencia_secundaria):
+                if lic is not None:
+                    por_licencia.setdefault(lic.pk, int(self.precio_cuenta))
+        if not por_licencia:
+            raise ValueError(
+                'No hay ninguna licencia configurada para los precios que pusiste. Revisa '
+                'Parametros del radar.')
+
+        tocadas = 0
+        for variante in GameDetail.objects.filter(producto=producto):
+            precio = por_licencia.get(variante.licencia_id)
+            if precio is None:
+                continue
+            # Si la promocion no mejora lo que ya cobras, no se toca: dejarla
+            # pondria un "descuento" mas caro que el precio normal.
+            if variante.precio and precio >= variante.precio:
+                continue
+            variante.precio_descuento = precio
+            variante.save(update_fields=['precio_descuento'])
+            tocadas += 1
+
+        if not tocadas:
+            raise ValueError(
+                'Ninguna variante de "%s" (#%s) quedo con descuento: o no hay variantes de esas '
+                'licencias, o tu precio actual ya es igual o mejor que el de la promocion.'
+                % (producto.title, producto.id_product))
+
+        self.producto_publicado_id = producto.id_product
+        self.publicado_en = timezone.now()
+        self.estado = 'publicado'
+        self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado'])
+        return producto
+
+    def _retirar_de_ficha_existente(self):
+        """Quita el descuento y deja el producto como estaba.
+
+        No se toca el stock: ese producto se sigue vendiendo cuando la
+        promocion termina, solo que a su precio de siempre.
         """
         from products.models import GameDetail
 
-        if self.producto_publicado_id:
+        GameDetail.objects.filter(producto_id=self.producto_publicado_id).update(precio_descuento=0)
+
+    def despublicar(self):
+        """Saca la oferta de circulacion sin borrar nada.
+
+        Dos caminos, porque no es lo mismo retirar un producto que creo el
+        radar que retirar una promocion sobre un producto tuyo:
+
+        - producto del radar: se deja en stock 0, que es como el sitio ya
+          marca "agotado". No se borra, puede estar en el historial de una
+          venta.
+        - ficha propia: se le quita el descuento y punto. Dejarla en stock 0
+          sacaria de la tienda un producto que tienes en inventario y que se
+          sigue vendiendo perfectamente a su precio normal.
+        """
+        from products.models import GameDetail
+
+        if self.usa_ficha_propia():
+            self._retirar_de_ficha_existente()
+        elif self.producto_publicado_id:
             GameDetail.objects.filter(producto_id=self.producto_publicado_id).update(stock=0)
         self.estado = 'vencido'
         self.save(update_fields=['estado'])
