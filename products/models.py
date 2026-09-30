@@ -331,6 +331,47 @@ class Coupon(models.Model):
         return self.name_coupon
 
     # ------------------------------------------------------------------ #
+    #  Which cart items the coupon discounts                               #
+    # ------------------------------------------------------------------ #
+    def _discount_product_specs(self):
+        """Specs from the ``discount_products`` rules: (product_ids, license_ids).
+
+        ``license_ids`` empty means any licencia of those products. Accepts
+        the singular ``licencia`` as an alias of ``license_ids``.
+        """
+        specs = []
+        for rule in self.rules.filter(rule_type='discount_products'):
+            v = rule.value if isinstance(rule.value, dict) else {}
+            product_ids = set(v.get('product_ids') or [])
+            license_ids = set(v.get('license_ids') or [])
+            if v.get('licencia') is not None:
+                license_ids.add(v['licencia'])
+            if product_ids:
+                specs.append((product_ids, license_ids))
+        return specs
+
+    def is_restricted(self):
+        """True when the discount is limited to certain items (game_details
+        and/or a ``discount_products`` rule); False = whole cart."""
+        return self.game_details.exists() or bool(self._discount_product_specs())
+
+    def item_matches(self, item):
+        """Whether a cart item (dict with id_combination, category_id = id_product
+        and licencia_id) receives this coupon's discount. Unrestricted
+        coupons match every item."""
+        if not self.is_restricted():
+            return True
+        gd_ids = set(self.game_details.values_list('id_game_detail', flat=True))
+        if item.get('id_combination') in gd_ids:
+            return True
+        for product_ids, license_ids in self._discount_product_specs():
+            if item.get('category_id') in product_ids and (
+                not license_ids or item.get('licencia_id') in license_ids
+            ):
+                return True
+        return False
+
+    # ------------------------------------------------------------------ #
     #  Rule evaluation                                                     #
     # ------------------------------------------------------------------ #
     def validate_coupon(self, user, cart_total, cart_items, payment_method=None):
@@ -358,11 +399,8 @@ class Coupon(models.Model):
         if self.user_id and self.user_id != user.pk:
             return False, 'Este cupón no es válido para tu cuenta.'
 
-        coupon_game_detail_ids = list(self.game_details.values_list('id_game_detail', flat=True))
-        if coupon_game_detail_ids:
-            cart_combination_ids = [item.get('id_combination') for item in cart_items]
-            if not any(gd_id in cart_combination_ids for gd_id in coupon_game_detail_ids):
-                return False, 'El cupón no aplica a los productos del carrito.'
+        if self.is_restricted() and not any(self.item_matches(item) for item in cart_items):
+            return False, 'El cupón no aplica a los productos del carrito.'
 
         for rule in self.rules.select_related():
             valid, reason = rule.evaluate(user, cart_total, cart_items)
@@ -389,6 +427,7 @@ class CouponRule(models.Model):
         REQUIRES_PRODUCT   = 'requires_product',   'Requiere producto en el carrito'
         MAX_DISCOUNTED_ITEMS = 'max_discounted_items', 'Máximo de ítems con descuento'
         MATCHING_LICENSE_TO_ANCHOR = 'matching_license_to_anchor', 'Licencia del regalo debe igualar la licencia de la compra ancla'
+        DISCOUNT_PRODUCTS  = 'discount_products',  'Producto con descuento (por producto/licencia)'
 
     class Operator(models.TextChoices):
         GTE     = 'gte',     'Mayor o igual (>=)'
@@ -412,7 +451,9 @@ class CouponRule(models.Model):
             'JSON con la configuración de la regla. Ejemplos: '
             '{"amount": 50000} | {"quantity": 3} | {"categories": [1,2]} | '
             '{"limit": 5} | {"days": [0,1,2,3,4]} | {"min": 10000, "max": 200000} | '
-            '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo)'
+            '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo) | '
+            '{"product_ids": [2], "license_ids": [3]} (discount_products: el descuento solo '
+            'aplica a ese producto, y a esas licencias si se indican; license_ids es opcional)'
         ),
     )
 
@@ -438,12 +479,11 @@ class CouponRule(models.Model):
         premio que separar y el total queda igual que siempre, asi que los
         cupones que ya existen no cambian de comportamiento.
         """
-        gift_ids = set(self.coupon.game_details.values_list('id_game_detail', flat=True))
-        if not gift_ids:
+        if not self.coupon.is_restricted():
             return cart_total
         gift_total = sum(
             item.get('pago_hoy', 0) for item in cart_items
-            if item.get('id_combination') in gift_ids
+            if self.coupon.item_matches(item)
         )
         return cart_total - gift_total
 
@@ -584,6 +624,13 @@ class CouponRule(models.Model):
         # eligible_items is built in _calculate_cart_amount, same reason
         # max_discounted_items lives there instead of here.
         elif rt == self.RuleType.MATCHING_LICENSE_TO_ANCHOR:
+            return True, ''
+
+        # --- discount_products ------------------------------------------
+        # Not a gate: it only narrows which items get the discount (see
+        # Coupon.item_matches). Whether the cart has a matching item is
+        # checked once in Coupon.validate_coupon.
+        elif rt == self.RuleType.DISCOUNT_PRODUCTS:
             return True, ''
 
         # Fallback – unknown / unhandled combination passes silently

@@ -1583,6 +1583,7 @@ def _calculate_cart_amount(parsed_transaction, allow_plans=True):
             'id_combination': combo_id,
             'quantity': 1,
             'category_id': gd.producto_id,
+            'licencia_id': gd.licencia_id,
             'modo_pago': modo_pago,
             'pago_hoy': pago_hoy,
         })
@@ -1608,11 +1609,7 @@ def _calculate_cart_amount(parsed_transaction, allow_plans=True):
             # total del plan -- ver docs/cuotas-y-reserva.md §4.3.
             return pago_hoy_por_combo[combo_id]
 
-        eligible_ids = set(coupon.game_details.values_list('id_game_detail', flat=True))
-        eligible_items = [
-            i for i in cart_items
-            if not eligible_ids or i['id_combination'] in eligible_ids
-        ]
+        eligible_items = [i for i in cart_items if coupon.item_matches(i)]
 
         # When the coupon restricts which gift licencia (Primaria/Secundaria)
         # an anchor's licencia unlocks, a gift item only stays eligible if
