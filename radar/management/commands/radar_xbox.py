@@ -25,10 +25,39 @@ from radar.models import (
     PrecioRegional,
     TasaCambio,
     TasaTienda,
+    retirar_ofertas_desaparecidas,
 )
 from radar.tiendas import xbox
 
 REGIONES_COMPRA = ['TR', 'IN', 'SA', 'US']
+
+
+# La tienda manda los titulos en ingles y el catalogo propio esta en espanol,
+# asi que "Assassin's Creed Valhalla Complete Edition" no cruzaba con
+# "ASSASSIN'S CREED VALHALLA EDICION COMPLETA" y el juego aparecia como si no
+# lo vendieramos.
+#
+# Las palabras de edicion NO se borran, se traducen a una sola forma. Borrarlas
+# seria peor: el catalogo tiene Valhalla a secas, Valhalla Gold y Valhalla
+# Edicion Completa, y sin esas palabras los tres colapsan en la misma clave --
+# un cruce equivocado es peor que ninguno, porque lleva a tocarle el precio al
+# producto que no era.
+EDICIONES = {
+    'completa': 'complete', 'completo': 'complete', 'complete': 'complete',
+    'oro': 'gold', 'gold': 'gold',
+    'definitiva': 'definitive', 'definitive': 'definitive',
+    'deluxe': 'deluxe',
+    'ultimate': 'ultimate',
+    'premium': 'premium',
+    'aniversario': 'anniversary', 'anniversary': 'anniversary',
+    'remasterizado': 'remastered', 'remasterizada': 'remastered',
+    'remastered': 'remastered',
+    'goty': 'goty',
+}
+
+# Palabras que no distinguen una edicion de otra y solo estorban al cruzar.
+RELLENO = {'edicion', 'edition', 'standard', 'estandar', 'ingles', 'english',
+           'espanol', 'spanish'}
 
 
 def normalizar(titulo):
@@ -38,11 +67,13 @@ def normalizar(titulo):
         titulo = unidecode(titulo)
     except ImportError:
         pass
-    titulo = titulo.lower()
-    # Fuera sufijos de edicion, que son la causa mas comun de falsos negativos.
-    titulo = re.sub(r'\b(edicion|edition|deluxe|ultimate|standard|estandar|goty|remastered)\b', ' ', titulo)
-    titulo = re.sub(r'[^a-z0-9]+', ' ', titulo)
-    return ' '.join(titulo.split())
+    titulo = re.sub(r'[^a-z0-9]+', ' ', titulo.lower())
+    palabras = []
+    for palabra in titulo.split():
+        if palabra in RELLENO:
+            continue
+        palabras.append(EDICIONES.get(palabra, palabra))
+    return ' '.join(palabras)
 
 
 class Command(BaseCommand):
@@ -252,6 +283,14 @@ class Command(BaseCommand):
                         },
                     )
                     guardados += 1
+
+        # Lo que la tienda dejo de listar tiene que salir del radar, o su
+        # precio viejo sigue apareciendo como oportunidad para siempre.
+        vistos = {region: {o['id_externo'] for o in por_region[region]} for region in regiones}
+        precios_fuera, juegos_fuera = retirar_ofertas_desaparecidas('XBOX', vistos)
+        if precios_fuera or juegos_fuera:
+            self.stdout.write('Ya no estan en oferta: %s precios y %s juegos salieron del radar.'
+                              % (precios_fuera, juegos_fuera))
 
         return len(fichas), guardados
 

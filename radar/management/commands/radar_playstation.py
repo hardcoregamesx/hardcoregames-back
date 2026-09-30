@@ -24,6 +24,7 @@ from radar.models import (
     PrecioRegional,
     TasaCambio,
     TasaTienda,
+    retirar_ofertas_desaparecidas,
 )
 from radar.tiendas import playstation
 
@@ -188,6 +189,18 @@ class Command(BaseCommand):
                         },
                     )
                     guardados += 1
+
+        # Igual que en Xbox: lo que Sony dejo de listar sale del radar. Aqui el
+        # id que se guarda es el SKU de Colombia (la clave del cruce), no el de
+        # la region de compra.
+        vistos = {region: set() for region in regiones}
+        for clave, entrada in cruzados.items():
+            for region in entrada['regiones']:
+                vistos[region].add(clave)
+        precios_fuera, juegos_fuera = retirar_ofertas_desaparecidas('PS', vistos)
+        if precios_fuera or juegos_fuera:
+            self.stdout.write('Ya no estan en oferta: %s precios y %s juegos salieron del radar.'
+                              % (precios_fuera, juegos_fuera))
 
         return len(cruzados), guardados
 

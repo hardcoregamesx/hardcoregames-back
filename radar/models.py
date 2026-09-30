@@ -1152,3 +1152,60 @@ class ComboJuego(models.Model):
 
     def __str__(self):
         return self.juego.titulo
+
+
+def retirar_ofertas_desaparecidas(tienda, vistos_por_region):
+    """Borra los precios de las ofertas que la tienda ya no lista.
+
+    Sin esto el radar solo sabe sumar. Un juego que sale del catalogo de
+    ofertas se queda con su precio viejo para siempre: la pantalla de Juegos
+    detectados lo sigue mostrando como oportunidad, con un costo que ya no
+    existe, y no hay como distinguirlo de uno vigente. En dos semanas de
+    corridas, media pantalla es ruido.
+
+    `vistos_por_region` es {region: set(id_externo)} con lo que SI aparecio en
+    esta corrida. Solo se tocan las regiones que se consultaron: si una fallo,
+    sus precios se dejan quietos -- vaciar el radar por un corte de red seria
+    peor que la enfermedad.
+
+    Devuelve (precios_borrados, juegos_borrados).
+    """
+    from radar.models import ComboJuego, JuegoDetectado, PrecioRegional
+
+    precios_borrados = 0
+    for region, vistos in vistos_por_region.items():
+        viejos = PrecioRegional.objects.filter(juego__tienda=tienda, region=region)
+        if vistos:
+            viejos = viejos.exclude(juego__id_externo__in=vistos)
+        cantidad = viejos.count()
+        if cantidad:
+            viejos.delete()
+            precios_borrados += cantidad
+
+    # Un juego sin ningun precio regional ya no esta en oferta en ninguna
+    # parte. Se borra solo si nunca llego a la tienda: si esta publicado, de
+    # eso se encargan radar_vencer y radar_limpiar, que ademas miran si hubo
+    # ventas antes de tocar nada.
+    #
+    # Los descartados tampoco: descartar es una decision ("este no me
+    # interesa"), y borrarlos haria que volvieran a aparecer la proxima vez
+    # que la tienda los ponga en oferta.
+    candidatos = list(JuegoDetectado.objects
+                      .filter(tienda=tienda, precios__isnull=True,
+                              producto_publicado_id__isnull=True)
+                      .exclude(estado__in=['publicado', 'descartado'])
+                      .values_list('pk', flat=True))
+
+    # Los que estan dentro de un combo se quedan. Borrarlos vaciaria el combo
+    # por la cascada de ComboJuego, y un combo publicado al que se le cae un
+    # juego en silencio sigue vendiendose con una promesa que ya no cumple.
+    # Asi el combo queda visible en el admin diciendo que le falta ese juego.
+    if candidatos:
+        en_combos = set(ComboJuego.objects.filter(juego_id__in=candidatos)
+                        .values_list('juego_id', flat=True))
+        candidatos = [pk for pk in candidatos if pk not in en_combos]
+
+    juegos_borrados = len(candidatos)
+    if candidatos:
+        JuegoDetectado.objects.filter(pk__in=candidatos).delete()
+    return precios_borrados, juegos_borrados
