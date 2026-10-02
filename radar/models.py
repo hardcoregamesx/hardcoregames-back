@@ -14,6 +14,7 @@ y no como ForeignKey.
 
 Ver docs/radar-ofertas.md.
 """
+import json
 from decimal import Decimal
 
 from django.db import models
@@ -415,6 +416,12 @@ class JuegoDetectado(models.Model):
     )
     producto_publicado_id = models.IntegerField(null=True, blank=True)
     publicado_en = models.DateTimeField(null=True, blank=True)
+    descuentos_previos = models.TextField(
+        blank=True, default='',
+        help_text='Que descuento tenia cada variante de tu ficha antes de que el radar le '
+                  'pusiera el suyo. Se usa para devolverselo al retirar la oferta. Lo maneja '
+                  'el sistema solo.',
+    )
     reusar_existente = models.BooleanField(
         default=True, verbose_name='Usar la ficha del catalogo',
         help_text='Si este juego ya esta en el catalogo, al publicarlo se le pone el descuento '
@@ -856,6 +863,15 @@ class JuegoDetectado(models.Model):
                 'No hay ninguna licencia configurada para los precios que pusiste. Revisa '
                 'Parametros del radar.')
 
+        # Si la oferta estaba en OTRA ficha tuya -- porque el cruce cambio de
+        # producto -- hay que devolverle su precio antes de irse, o se queda
+        # con un descuento que ya nadie va a retirar.
+        if (self.producto_publicado_id
+                and self.producto_publicado_id != producto.id_product
+                and self.usa_ficha_propia()):
+            self._retirar_de_ficha_existente()
+
+        previos = self._descuentos_previos()
         tocadas = 0
         for variante in GameDetail.objects.filter(producto=producto):
             precio = por_licencia.get(variante.licencia_id)
@@ -865,6 +881,11 @@ class JuegoDetectado(models.Model):
             # pondria un "descuento" mas caro que el precio normal.
             if variante.precio and precio >= variante.precio:
                 continue
+            # Se anota lo que tenia ANTES de pisarlo. La ficha puede traer una
+            # promocion tuya -- Ninja Gaiden 4 en Xbox la tiene -- y al
+            # retirar la del radar hay que devolver esa, no un cero que la
+            # borraria.
+            previos.setdefault(str(variante.pk), variante.precio_descuento or 0)
             variante.precio_descuento = precio
             variante.save(update_fields=['precio_descuento'])
             tocadas += 1
@@ -875,21 +896,46 @@ class JuegoDetectado(models.Model):
                 'licencias, o tu precio actual ya es igual o mejor que el de la promocion.'
                 % (producto.title, producto.id_product))
 
+        self.descuentos_previos = json.dumps(previos)
         self.producto_publicado_id = producto.id_product
         self.publicado_en = timezone.now()
         self.estado = 'publicado'
-        self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado'])
+        self.save(update_fields=['producto_publicado_id', 'publicado_en', 'estado',
+                                 'descuentos_previos'])
         return producto
 
-    def _retirar_de_ficha_existente(self):
-        """Quita el descuento y deja el producto como estaba.
+    def _descuentos_previos(self):
+        try:
+            datos = json.loads(self.descuentos_previos or '{}')
+        except ValueError:
+            return {}
+        return datos if isinstance(datos, dict) else {}
 
-        No se toca el stock: ese producto se sigue vendiendo cuando la
-        promocion termina, solo que a su precio de siempre.
+    def _retirar_de_ficha_existente(self):
+        """Devuelve el producto exactamente a como estaba.
+
+        No a cero: a lo que tenia. Una ficha tuya puede traer su propia
+        promocion -- Ninja Gaiden 4 en Xbox la tiene -- y ponerle cero al
+        retirar la del radar le borraria un descuento que pusiste tu.
+
+        El stock no se toca: ese producto se sigue vendiendo cuando la
+        promocion del radar termina, solo que a su precio.
         """
         from products.models import GameDetail
 
-        GameDetail.objects.filter(producto_id=self.producto_publicado_id).update(precio_descuento=0)
+        previos = self._descuentos_previos()
+        variantes = GameDetail.objects.filter(producto_id=self.producto_publicado_id)
+        if previos:
+            for variante in variantes:
+                variante.precio_descuento = int(previos.get(str(variante.pk), 0) or 0)
+                variante.save(update_fields=['precio_descuento'])
+        else:
+            # Publicadas antes de que se guardara el valor anterior: lo unico
+            # que se puede hacer es dejarlas sin descuento.
+            variantes.update(precio_descuento=0)
+        if self.descuentos_previos:
+            self.descuentos_previos = ''
+            self.save(update_fields=['descuentos_previos'])
 
     def despublicar(self):
         """Saca la oferta de circulacion sin borrar nada.

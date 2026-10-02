@@ -236,7 +236,10 @@ CREATE TABLE IF NOT EXISTS radar_tasatienda (
 -- Si el juego ya esta en el catalogo, publicar la oferta sobre ESA ficha en
 -- vez de crear un producto nuevo (ver JuegoDetectado._publicar_sobre_ficha_existente).
 ALTER TABLE radar_juegodetectado
-  ADD COLUMN IF NOT EXISTS reusar_existente boolean NOT NULL DEFAULT true;
+  ADD COLUMN IF NOT EXISTS reusar_existente boolean NOT NULL DEFAULT true,
+  -- Que descuento tenia cada variante de la ficha propia antes de que el radar
+  -- le pusiera el suyo, para devolverselo al retirar la oferta.
+  ADD COLUMN IF NOT EXISTS descuentos_previos text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS radar_combo (
   id serial PRIMARY KEY,
