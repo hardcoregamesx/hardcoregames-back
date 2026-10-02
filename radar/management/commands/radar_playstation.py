@@ -26,6 +26,7 @@ from radar.models import (
     TasaTienda,
     buscador_de_catalogo,
     retirar_ofertas_desaparecidas,
+    revisar_fichas_propias,
 )
 from radar.tiendas import playstation
 
@@ -198,6 +199,14 @@ class Command(BaseCommand):
         for clave, entrada in cruzados.items():
             for region in entrada['regiones']:
                 vistos[region].add(clave)
+        # Una ficha propia que dejo de ser ese juego -- porque se
+        # reaprovecho el producto para otro -- se queda con el descuento del
+        # radar encima. Aqui se sueltan.
+        for titulo, liberado in revisar_fichas_propias('PS'):
+            self.stdout.write(self.style.WARNING(
+                '  "%s" ya no corresponde al producto #%s: se le devolvio su precio y la '
+                'oferta quedo preparada sin publicar.' % (titulo[:44], liberado)))
+
         precios_fuera, juegos_fuera, saltadas = retirar_ofertas_desaparecidas('PS', vistos)
         if precios_fuera or juegos_fuera:
             self.stdout.write('Ya no estan en oferta: %s precios y %s juegos salieron del radar.'

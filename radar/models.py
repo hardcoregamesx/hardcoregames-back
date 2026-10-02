@@ -1481,3 +1481,42 @@ def buscar_en_catalogo(normalizar, tienda, parametros=None):
         return None
 
     return buscar
+
+
+def revisar_fichas_propias(tienda):
+    """Suelta las fichas propias que ya no corresponden a su oferta.
+
+    Una oferta publicada sobre una ficha tuya queda atada a ella para
+    siempre, aunque la ficha deje de ser ese juego. Pasa de verdad: el dueno
+    reaprovecho el producto #266 ("Ninja Gaiden 4" en Xbox) para Gears of War.
+    La ficha cambia de juego y el descuento del radar se queda encima, ahora
+    sobre un producto que no tiene nada que ver.
+
+    Nadie lo detectaba porque el cruce se recalcula en cada corrida, pero la
+    publicacion no: `producto_publicado_id` seguia apuntando a la ficha vieja.
+
+    Aqui se compara lo publicado con lo que el cruce dice HOY. Si ya no
+    coinciden, se le devuelve a la ficha su precio y la oferta se deja
+    preparada pero sin publicar -- con sus precios intactos, lista para
+    publicarse sobre pedido si el dueno quiere. No se republica sola: cambiar
+    una ficha de juego es una decision suya, y adivinar que quiso decir seria
+    pasarse.
+
+    Devuelve la lista de (titulo, id_producto_liberado).
+    """
+    sueltas = []
+    publicados = (JuegoDetectado.objects
+                  .filter(tienda=tienda, estado='publicado')
+                  .exclude(producto_publicado_id=None))
+    for juego in publicados:
+        if not juego.usa_ficha_propia():
+            continue
+        if juego.producto_publicado_id == juego.producto_existente_id:
+            continue
+        liberado = juego.producto_publicado_id
+        juego._retirar_de_ficha_existente()
+        juego.producto_publicado_id = None
+        juego.estado = 'aprobado'
+        juego.save(update_fields=['producto_publicado_id', 'estado'])
+        sueltas.append((juego.titulo, liberado))
+    return sueltas

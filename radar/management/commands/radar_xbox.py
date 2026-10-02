@@ -27,6 +27,7 @@ from radar.models import (
     TasaTienda,
     buscador_de_catalogo,
     retirar_ofertas_desaparecidas,
+    revisar_fichas_propias,
 )
 from radar.tiendas import xbox
 
@@ -296,6 +297,14 @@ class Command(BaseCommand):
         # Lo que la tienda dejo de listar tiene que salir del radar, o su
         # precio viejo sigue apareciendo como oportunidad para siempre.
         vistos = {region: {o['id_externo'] for o in por_region[region]} for region in regiones}
+        # Una ficha propia que dejo de ser ese juego -- porque se
+        # reaprovecho el producto para otro -- se queda con el descuento del
+        # radar encima. Aqui se sueltan.
+        for titulo, liberado in revisar_fichas_propias('XBOX'):
+            self.stdout.write(self.style.WARNING(
+                '  "%s" ya no corresponde al producto #%s: se le devolvio su precio y la '
+                'oferta quedo preparada sin publicar.' % (titulo[:44], liberado)))
+
         precios_fuera, juegos_fuera, saltadas = retirar_ofertas_desaparecidas('XBOX', vistos)
         if precios_fuera or juegos_fuera:
             self.stdout.write('Ya no estan en oferta: %s precios y %s juegos salieron del radar.'
