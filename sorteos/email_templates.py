@@ -9,6 +9,8 @@ la plantilla de confirmacion de compra (settings.EMAIL_FOR_SALE) porque esa
 trae secciones de guias de instalacion que no aplican aqui.
 """
 
+from datetime import timedelta, timezone
+
 # Tokens de marca (ver hardcoregames-architecture: paleta extraida de
 # assets/index-ssfX69jx.css en produccion, convertidos de HSL a hex).
 BG = '#150A29'
@@ -21,17 +23,36 @@ GREEN_CTA = '#42D780'
 GRADIENT = 'linear-gradient(135deg,#4C0F85 0%,#2DBEEB 100%)'
 GRADIENT_BAR = 'linear-gradient(90deg,#2DBEEB 0%,#4C0F85 50%,#2DBEEB 100%)'
 
-INSTAGRAM_URL = 'https://instagram.com/hardcoregamesx'
 WHATSAPP_URL = 'https://wa.link/y72sz9'
 LOGO_URL = 'https://www.hardcoregames.co/assets/logo-CYf73ajV.png'
+
+# Colombia no tiene horario de verano: offset fijo, sin depender de tzdata.
+COLOMBIA_TZ = timezone(timedelta(hours=-5))
+MESES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
 
 
 def winner_email_subject(sorteo):
     return f'🎉 ¡Ganaste el sorteo {sorteo.title}!'
 
 
+def _deadline_paragraph(sorteo):
+    """Línea de fecha límite para reclamar, o vacía si el sorteo no la define."""
+    if not sorteo.claim_deadline:
+        return ''
+    local = sorteo.claim_deadline.astimezone(COLOMBIA_TZ)
+    texto = f'{local.day} de {MESES[local.month - 1]} de {local.year} a las {local:%H:%M} (hora Colombia)'
+    return f'''
+    <p style="margin:14px 0 0;color:{GOLD_CTA};font-size:14px;line-height:1.7;font-weight:700;">
+      Tienes hasta el {texto} para hacer tu compra y reclamar el premio.
+    </p>'''
+
+
 def winner_email_html(sorteo, user):
     first_name = ((user.first_name or user.username or '').split(' ') or ['crack'])[0] or 'crack'
+    deadline_p = _deadline_paragraph(sorteo)
 
     prize_img_row = ''
     if sorteo.prize_image_url:
@@ -77,26 +98,18 @@ def winner_email_html(sorteo, user):
   <tr><td style="padding:22px 24px;">
     <p style="margin:0 0 14px;color:{GOLD_CTA};font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;">Para reclamar tu premio</p>
     <p style="margin:0 0 12px;color:{TEXT_BODY};font-size:14px;line-height:1.7;">
-      <strong style="color:#ffffff;">1.</strong> Sube una historia a Instagram etiquetando a
-      <a href="{INSTAGRAM_URL}" style="color:#2DBEEB;text-decoration:none;font-weight:700;" target="_blank">@hardcoregamesx</a>,
-      mostrándote como ganador del sorteo y agradeciéndonos. 🙌
+      <strong style="color:#ffffff;">1.</strong> Haz tu próxima compra en Hardcore Games. <strong style="color:#ffffff;">Cualquier compra cuenta</strong> para reclamar tu premio.
     </p>
-    <p style="margin:0;color:{TEXT_BODY};font-size:14px;line-height:1.7;">
-      <strong style="color:#ffffff;">2.</strong> Escríbenos por WhatsApp para coordinar la entrega de tu premio.
+    <p style="margin:0 0 12px;color:{TEXT_BODY};font-size:14px;line-height:1.7;">
+      <strong style="color:#ffffff;">2.</strong> Escríbenos por WhatsApp con tu compra para coordinar la entrega de tu premio.
     </p>
+    {deadline_p}
   </td></tr>
   </table>
 </td></tr>
 
 <tr><td align="center" style="padding:0 30px 34px;">
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-  <tr><td align="center" style="padding-bottom:12px;">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color:{GOLD_CTA};border-radius:6px;padding:13px 28px;">
-        <a href="{INSTAGRAM_URL}" style="color:{BG};text-decoration:none;font-weight:700;font-size:14px;" target="_blank">📲 Subir mi historia</a>
-      </td>
-    </tr></table>
-  </td></tr>
   <tr><td align="center">
     <table role="presentation" cellpadding="0" cellspacing="0"><tr>
       <td style="background-color:{GREEN_CTA};border-radius:6px;padding:13px 28px;">

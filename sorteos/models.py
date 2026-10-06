@@ -28,6 +28,10 @@ class Sorteo(models.Model):
     )
     start_date = models.DateTimeField(verbose_name='Fecha de inicio')
     end_date = models.DateTimeField(verbose_name='Fecha de fin')
+    claim_deadline = models.DateTimeField(
+        null=True, blank=True, verbose_name='Fecha límite para reclamar',
+        help_text='Vacío = el correo de ganador no muestra fecha límite. Se muestra en hora Colombia.',
+    )
     min_purchases = models.IntegerField(
         null=True, blank=True, verbose_name='Compras mínimas',
         help_text='Vacío = este requisito no aplica.',
@@ -39,6 +43,10 @@ class Sorteo(models.Model):
     require_both = models.BooleanField(
         default=False, verbose_name='Requiere ambos requisitos',
         help_text='Si están configurados compras mínimas Y valor mínimo, marca esto para exigir los dos a la vez en vez de cualquiera de los dos.',
+    )
+    min_amount_per_purchase = models.BooleanField(
+        default=False, verbose_name='Valor mínimo por compra única',
+        help_text='Marcado: una sola compra debe superar el valor mínimo (estrictamente mayor). Desmarcado: se suman todas las compras.',
     )
     winners_count = models.IntegerField(default=1, verbose_name='Cantidad de ganadores')
     status = models.CharField(max_length=20, choices=SORTEO_STATUS_CHOICES, default='DRAFT', verbose_name='Estado')

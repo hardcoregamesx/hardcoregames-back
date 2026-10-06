@@ -14,7 +14,7 @@ import random
 from datetime import datetime, timezone
 
 from django.contrib.auth.models import User
-from django.db.models import Count, Sum
+from django.db.models import Count, Max, Sum
 
 from products.models import Transactions
 from utils.SendEmail import SendEmail
@@ -33,11 +33,16 @@ STATUS_PARTICIPA = 'Participa'
 STATUS_PARCIAL = 'Parcial'
 
 
-def qualifies(purchases_count, amount_sum, sorteo):
+def qualifies(purchases_count, amount_sum, sorteo, max_purchase_amount=0):
     has_count_req = sorteo.min_purchases is not None
     has_amount_req = sorteo.min_amount is not None
     count_ok = (not has_count_req) or purchases_count >= sorteo.min_purchases
-    amount_ok = (not has_amount_req) or (amount_sum or 0) >= sorteo.min_amount
+    if not has_amount_req:
+        amount_ok = True
+    elif sorteo.min_amount_per_purchase:
+        amount_ok = (max_purchase_amount or 0) > sorteo.min_amount
+    else:
+        amount_ok = (amount_sum or 0) >= sorteo.min_amount
 
     if has_count_req and has_amount_req:
         return (count_ok and amount_ok) if sorteo.require_both else (count_ok or amount_ok)
@@ -67,15 +72,22 @@ def participation_rows(sorteo):
             date_transaction__lte=sorteo.end_date,
         )
         .values('user_id')
-        .annotate(purchases_count=Count('id_transaction'), amount_sum=Sum('amount'))
+        .annotate(
+            purchases_count=Count('id_transaction'),
+            amount_sum=Sum('amount'),
+            max_purchase_amount=Max('amount'),
+        )
     )
     result = []
     for row in rows:
-        row_qualifies = qualifies(row['purchases_count'], row['amount_sum'], sorteo)
+        row_qualifies = qualifies(
+            row['purchases_count'], row['amount_sum'], sorteo, row['max_purchase_amount'],
+        )
         result.append({
             'user_id': row['user_id'],
             'purchases_count': row['purchases_count'],
             'amount_sum': row['amount_sum'],
+            'max_purchase_amount': row['max_purchase_amount'],
             'status': STATUS_PARTICIPA if row_qualifies else STATUS_PARCIAL,
         })
     return result

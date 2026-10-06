@@ -58,8 +58,8 @@ class SorteoAdmin(admin.ModelAdmin):
     actions = [ejecutar_sorteo]
     readonly_fields = ('participantes_actuales',)
     fields = (
-        'title', 'legend', 'prize_image_url', 'start_date', 'end_date',
-        'min_purchases', 'min_amount', 'require_both', 'winners_count', 'status',
+        'title', 'legend', 'prize_image_url', 'start_date', 'end_date', 'claim_deadline',
+        'min_purchases', 'min_amount', 'min_amount_per_purchase', 'require_both', 'winners_count', 'status',
         'participantes_actuales',
     )
 
