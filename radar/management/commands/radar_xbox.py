@@ -25,7 +25,7 @@ from radar.models import (
     PrecioRegional,
     TasaCambio,
     TasaTienda,
-    buscador_de_catalogo,
+    buscar_en_catalogo as buscador_de_catalogo,
     retirar_ofertas_desaparecidas,
     revisar_fichas_propias,
 )
