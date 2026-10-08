@@ -3,6 +3,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -495,6 +496,20 @@ class CouponRule(models.Model):
 
     def __str__(self):
         return f'{self.get_rule_type_display()} [{self.get_operator_display()}]'
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.value, dict):
+            raise ValidationError({
+                'value': (
+                    'El valor debe ser un objeto JSON (diccionario), no un número, '
+                    'texto o lista suelta. Ejemplos: {"amount": 50000} | {"limit": 5}.'
+                )
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def _total_sin_regalo(self, cart_total, cart_items):
         """Monto de la compra sin contar lo que el propio cupon regala.
