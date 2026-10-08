@@ -334,10 +334,17 @@ class Coupon(models.Model):
     #  Which cart items the coupon discounts                               #
     # ------------------------------------------------------------------ #
     def _discount_product_specs(self):
-        """Specs from the ``discount_products`` rules: (product_ids, license_ids).
+        """Specs from the ``discount_products`` rules: (product_ids, license_ids,
+        duration_days).
 
         ``license_ids`` empty means any licencia of those products. Accepts
-        the singular ``licencia`` as an alias of ``license_ids``.
+        the singular ``licencia`` as an alias of ``license_ids``. ``duration_days``
+        is ``None`` (any duration) unless the rule's value sets ``duration_days``
+        (accepts a single number or a list) -- needed for products like GAME
+        PASS PC, where the same producto_id+licencia_id covers several rental
+        durations (30/60/330 días) sold as separate accounts/stock, each with
+        its own GameDetail row. Without this, a coupon meant for only the
+        330-day pack would also discount the 30 and 60-day ones.
         """
         specs = []
         for rule in self.rules.filter(rule_type='discount_products'):
@@ -346,14 +353,18 @@ class Coupon(models.Model):
             license_ids = set(v.get('license_ids') or [])
             if v.get('licencia') is not None:
                 license_ids.add(v['licencia'])
+            duration = v.get('duration_days', v.get('duracion_dias_alquiler'))
+            duration_days = set(duration) if isinstance(duration, (list, set, tuple)) else (
+                {duration} if duration is not None else None
+            )
             if product_ids:
-                specs.append((product_ids, license_ids))
+                specs.append((product_ids, license_ids, duration_days))
         # match_all_variants: each combination picked in Restricciones also
         # stands for every combination of the same product and licencia
         # (e.g. any duration of YouTube Premium "código").
         if self.rules.filter(rule_type='match_all_variants').exists():
             for producto_id, licencia_id in self.game_details.values_list('producto_id', 'licencia_id'):
-                specs.append(({producto_id}, {licencia_id}))
+                specs.append(({producto_id}, {licencia_id}, None))
         return specs
 
     def is_restricted(self):
@@ -362,17 +373,19 @@ class Coupon(models.Model):
         return self.game_details.exists() or bool(self._discount_product_specs())
 
     def item_matches(self, item):
-        """Whether a cart item (dict with id_combination, category_id = id_product
-        and licencia_id) receives this coupon's discount. Unrestricted
-        coupons match every item."""
+        """Whether a cart item (dict with id_combination, category_id = id_product,
+        licencia_id and duracion_dias_alquiler) receives this coupon's discount.
+        Unrestricted coupons match every item."""
         if not self.is_restricted():
             return True
         gd_ids = set(self.game_details.values_list('id_game_detail', flat=True))
         if item.get('id_combination') in gd_ids:
             return True
-        for product_ids, license_ids in self._discount_product_specs():
+        for product_ids, license_ids, duration_days in self._discount_product_specs():
             if item.get('category_id') in product_ids and (
                 not license_ids or item.get('licencia_id') in license_ids
+            ) and (
+                duration_days is None or item.get('duracion_dias_alquiler') in duration_days
             ):
                 return True
         return False
@@ -461,6 +474,11 @@ class CouponRule(models.Model):
             '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo) | '
             '{"product_ids": [2], "license_ids": [3]} (discount_products: el descuento solo '
             'aplica a ese producto, y a esas licencias si se indican; license_ids es opcional) | '
+            '{"product_ids": [316], "license_ids": [4], "duration_days": 330} (discount_products '
+            'con duración: solo la variante de esos días, p.ej. GAME PASS PC 330 días vs 30/60 — '
+            'sin esto, la regla aplica a cualquier duración de ese producto/licencia; no usar '
+            '"Restricciones > Productos específicos" para esto, porque cada cuenta/stock es una '
+            'fila distinta y deja de coincidir en cuanto esa cuenta puntual se vende) | '
             '{"all": true} (match_all_variants: cada combinación elegida en Restricciones '
             'cubre todas las combinaciones con su mismo producto y licencia)'
         ),

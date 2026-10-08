@@ -1584,6 +1584,7 @@ def _calculate_cart_amount(parsed_transaction, allow_plans=True):
             'quantity': 1,
             'category_id': gd.producto_id,
             'licencia_id': gd.licencia_id,
+            'duracion_dias_alquiler': gd.duracion_dias_alquiler,
             'modo_pago': modo_pago,
             'pago_hoy': pago_hoy,
         })
