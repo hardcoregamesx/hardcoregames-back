@@ -471,6 +471,11 @@ class CouponRule(models.Model):
             'JSON con la configuración de la regla. Ejemplos: '
             '{"amount": 50000} | {"quantity": 3} | {"categories": [1,2]} | '
             '{"limit": 5} | {"days": [0,1,2,3,4]} | {"min": 10000, "max": 200000} | '
+            '{"amount": 164700, "include_restricted_items": true} (min_order_amount: cuenta el '
+            'carrito completo, incluido lo que el propio cupón descuenta -- p.ej. "compra $164.700 '
+            'en total, Game Pass incluido, y te lo dejamos al 100%". Sin este flag, el mínimo se mide '
+            'excluyendo el precio de los ítems restringidos por el cupón, para que un cupón tipo '
+            '"compra X y llévate Y gratis" no se desbloquee a sí mismo agregando solo el regalo) | '
             '{"product_ids": [26, 12]} (requires_product, usa id_product del catálogo) | '
             '{"product_ids": [2], "license_ids": [3]} (discount_products: el descuento solo '
             'aplica a ese producto, y a esas licencias si se indican; license_ids es opcional) | '
@@ -529,7 +534,14 @@ class CouponRule(models.Model):
         # --- min_order_amount -------------------------------------------
         if rt == self.RuleType.MIN_ORDER_AMOUNT:
             amount = v.get('amount', 0)
-            purchase_total = self._total_sin_regalo(cart_total, cart_items)
+            # include_restricted_items=true mide el carrito completo (p.ej.
+            # "compra $164.700 en total, Game Pass incluido, y te lo
+            # dejamos al 100%"). Sin el flag, por defecto se excluye el
+            # precio de lo que el cupon mismo descuenta (ver
+            # _total_sin_regalo) -- necesario para cupones tipo "compra X y
+            # llevate Y gratis", donde el regalo no debe contar para
+            # desbloquearse a si mismo.
+            purchase_total = cart_total if v.get('include_restricted_items') else self._total_sin_regalo(cart_total, cart_items)
             if op == self.Operator.GTE:
                 if purchase_total >= amount:
                     return True, ''
