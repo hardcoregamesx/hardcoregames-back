@@ -4,6 +4,7 @@ import random
 
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
+from datetime import timedelta
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -17,6 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from django.conf import settings
 from users.models import User_Customized
+from products.models import Coupon
 from users.userSerializer import UserSerializer, UserResponseSerializer, UserCustomSerializer
 from utils.SendEmail import SendEmail
 from utils.getJsonFromRequest import GetJsonFromRequest
@@ -67,6 +69,11 @@ def get_user_by_id(request, id_user, self=None):
 @login_required
 def index(request):
     return HttpResponse(JsonResponse({'message': 'index'}), content_type="application/json")
+
+
+WELCOME_BONUS_SOURCE = 'beneficios'
+WELCOME_BONUS_AMOUNT = 3000
+WELCOME_BONUS_MINUTES = 30
 
 
 @csrf_exempt
@@ -164,8 +171,27 @@ def register(request, self=None):
                                           origen_fecha=origen_fecha,
                                           )
         user_customized.save()
+
+        # Bono de bienvenida de /beneficios: solo para cuentas nuevas (no
+        # invitado) que llegan desde esa página y ya verificaron su correo con
+        # el código OTP (cache email_verified, ver validate_email_token), para
+        # que no se pueda farmear creando cuentas con correos ajenos/falsos.
+        bonus_granted = False
+        if (not guest_checkout and body.get('bonus_source') == WELCOME_BONUS_SOURCE
+                and cache.get(f"email_verified:{email}")):
+            Coupon.objects.create(
+                name_coupon=f"WELCOME-{last_user_id}-{int(timezone.now().timestamp())}",
+                expiration_date=timezone.now() + timedelta(minutes=WELCOME_BONUS_MINUTES),
+                is_valid=True,
+                user_id=last_user_id,
+                discount_type='FIXED_AMOUNT',
+                fixed_amount=WELCOME_BONUS_AMOUNT,
+                source='WELCOME',
+            )
+            bonus_granted = True
         return HttpResponse(JsonResponse({'message': 'usuario registrado exitosamente', "status": 200,
-                                          "code": "00", "user_id": last_user_id}), content_type="application/json")
+                                          "code": "00", "user_id": last_user_id,
+                                          "welcome_bonus": bonus_granted}), content_type="application/json")
 
 
 @csrf_exempt
