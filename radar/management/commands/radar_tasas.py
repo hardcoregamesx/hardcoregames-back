@@ -10,14 +10,22 @@ from radar.tiendas import vouchers
 
 # Base USD, gratis y sin llave. Cubre COP, TRY, INR y SAR.
 API_TASAS = 'https://open.er-api.com/v6/latest/USD'
-# TRM oficial de Colombia, solo para sembrar el valor inicial del dolar.
+# TRM oficial de Colombia. Es el dolar que pagaria el cliente comprando el solo.
 API_TRM = 'https://www.datos.gov.co/resource/32sa-8pi3.json?$limit=1&$order=vigenciadesde%20DESC'
+# Binance P2P, la misma API publica y sin llave que usa su web. tradeType BUY
+# son los anuncios de quien vende USDT por pesos: lo que cuesta comprarlo.
+API_BINANCE_P2P = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search'
 
-# Monedas de las regiones de compra del negocio.
-MONEDAS = ['USD', 'TRY', 'INR', 'SAR']
+# Si el USDT mas barato se aleja de la TRM mas que esto, el anuncio no es real
+# (o la API cambio) y se conserva el dolar del dia anterior.
+DESVIO_MAXIMO_USDT = Decimal('0.10')
+
+# Monedas de las regiones de compra del negocio. USD y TRM van aparte.
+MONEDAS = ['TRY', 'INR', 'SAR']
 
 NOTAS = {
-    'USD': 'Manual: el dolar se consigue por debajo de la TRM. Editar con el costo real.',
+    'USD': 'Automatico: USDT mas barato de Binance P2P. Con el se paga buysellvouchers.',
+    'TRM': 'TRM oficial (datos.gov.co). Precio de referencia de la tienda PS Colombia.',
     'SAR': 'El rial esta anclado al dolar a 3,75 desde 1986.',
 }
 
@@ -25,15 +33,15 @@ NOTAS = {
 class Command(BaseCommand):
     help = (
         'Actualiza las tasas de cambio del radar (cuantos pesos vale una unidad de cada '
-        'moneda de compra). Las tasas marcadas como manuales NO se tocan: el dolar es '
-        'manual a proposito, porque se consigue por debajo de la TRM y ese descuento es '
-        'margen que ninguna API conoce.'
+        'moneda de compra). El dolar (USD) es el USDT mas barato de Binance P2P, que es '
+        'con lo que se paga el saldo en buysellvouchers; la TRM se guarda aparte como '
+        'dolar de mercado. Las tasas marcadas como manuales NO se tocan.'
     )
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--forzar-usd', action='store_true',
-            help='Sobrescribe tambien el dolar con la TRM oficial, pisando el valor manual.',
+            help='Actualiza el dolar con Binance aunque este marcado como manual, y lo desmarca.',
         )
         parser.add_argument(
             '--dry-run', action='store_true',
@@ -66,44 +74,43 @@ class Command(BaseCommand):
         self.stdout.write('Tasas de %s' % datos.get('time_last_update_utc', 'fecha desconocida'))
 
         existentes = {t.moneda: t for t in TasaCambio.objects.all()}
-        escritas = 0
+        nuevas = {}
+
+        trm = self._trm() or cop_por_usd
+        if existentes.get('TRM') and existentes['TRM'].manual:
+            self.stdout.write('  TRM = %s COP (manual, sin tocar).' % existentes['TRM'].cop_por_unidad)
+        else:
+            nuevas['TRM'] = trm
+        nuevas['USD'] = self._dolar(existentes.get('USD'), trm, forzar_usd)
 
         for moneda in MONEDAS:
             actual = existentes.get(moneda)
+            por_usd = rates.get(moneda)
+            if not por_usd:
+                self.stderr.write(self.style.WARNING('  %s: la API no la trajo, se omite.' % moneda))
+                continue
+            try:
+                valor = cop_por_usd / Decimal(str(por_usd))
+            except (InvalidOperation, ZeroDivisionError):
+                self.stderr.write(self.style.WARNING('  %s: valor invalido, se omite.' % moneda))
+                continue
+            if actual and actual.manual:
+                self.stdout.write('  %s = %s COP (manual, sin tocar).' % (moneda, actual.cop_por_unidad))
+                continue
+            nuevas[moneda] = valor
 
-            if moneda == 'USD':
-                valor = self._trm() or cop_por_usd
-                if actual and actual.manual and not forzar_usd:
-                    self.stdout.write(
-                        '  USD = %s COP (manual, sin tocar). Referencia de mercado: %s'
-                        % (actual.cop_por_unidad, valor)
-                    )
-                    continue
-                manual = True
-            else:
-                por_usd = rates.get(moneda)
-                if not por_usd:
-                    self.stderr.write(self.style.WARNING('  %s: la API no la trajo, se omite.' % moneda))
-                    continue
-                try:
-                    valor = cop_por_usd / Decimal(str(por_usd))
-                except (InvalidOperation, ZeroDivisionError):
-                    self.stderr.write(self.style.WARNING('  %s: valor invalido, se omite.' % moneda))
-                    continue
-                if actual and actual.manual:
-                    self.stdout.write('  %s = %s COP (manual, sin tocar).' % (moneda, actual.cop_por_unidad))
-                    continue
-                manual = False
-
+        escritas = 0
+        for moneda, valor in nuevas.items():
+            if valor is None:
+                continue
             valor = valor.quantize(Decimal('0.000001'))
-            self.stdout.write('  %s = %s COP%s' % (moneda, valor, ' (manual)' if manual else ''))
-
+            self.stdout.write('  %s = %s COP' % (moneda, valor))
             if not dry_run:
                 TasaCambio.objects.update_or_create(
                     moneda=moneda,
                     defaults={
                         'cop_por_unidad': valor,
-                        'manual': manual,
+                        'manual': False,
                         'nota': NOTAS.get(moneda, ''),
                     },
                 )
@@ -154,8 +161,57 @@ class Command(BaseCommand):
                     },
                 )
 
+    def _dolar(self, actual, trm, forzar):
+        """Lo que cuesta de verdad un dolar: el USDT mas barato de Binance P2P.
+
+        El saldo de las tiendas se compra en buysellvouchers y se paga con
+        USDT, asi que el dolar del negocio es lo que cuesta ese USDT, no la
+        TRM. Devuelve None cuando no hay que escribir nada: la fila esta en
+        manual, o Binance fallo y se conserva el valor anterior.
+        """
+        if actual and actual.manual and not forzar:
+            self.stdout.write('  USD = %s COP (manual, sin tocar).' % actual.cop_por_unidad)
+            return None
+
+        usdt = self._usdt_binance()
+        if usdt is not None and abs(usdt / trm - 1) > DESVIO_MAXIMO_USDT:
+            self.stderr.write(self.style.WARNING(
+                '  USDT de Binance a %s COP se aleja mas de %s%% de la TRM (%s); se descarta.'
+                % (usdt, int(DESVIO_MAXIMO_USDT * 100), trm)))
+            usdt = None
+
+        if usdt is not None:
+            self.stdout.write('  USDT mas barato en Binance P2P: %s COP (%.1f%% bajo la TRM)'
+                              % (usdt, (1 - usdt / trm) * 100))
+            return usdt
+        if actual:
+            self.stderr.write(self.style.WARNING('  USD: se mantiene %s de %s.'
+                              % (actual.cop_por_unidad, actual.actualizado.strftime('%d/%m'))))
+            return None
+        # Sin Binance y sin valor anterior, la TRM es mejor que dejar al radar sin dolar.
+        self.stderr.write(self.style.WARNING('  USD: no hay valor anterior, se siembra con la TRM.'))
+        return trm
+
+    def _usdt_binance(self):
+        """El anuncio mas barato de USDT por pesos en Binance P2P."""
+        cuerpo = {
+            'fiat': 'COP', 'asset': 'USDT', 'tradeType': 'BUY',
+            'page': 1, 'rows': 10, 'payTypes': [], 'publisherType': None,
+        }
+        try:
+            r = requests.post(API_BINANCE_P2P, json=cuerpo, timeout=30)
+            r.raise_for_status()
+            precios = [Decimal(str(a['adv']['price'])) for a in r.json().get('data') or []]
+        except (requests.RequestException, ValueError, KeyError, TypeError, InvalidOperation) as exc:
+            self.stderr.write(self.style.WARNING('  No se pudo leer Binance P2P: %s' % exc))
+            return None
+        if not precios:
+            self.stderr.write(self.style.WARNING('  Binance P2P no devolvio anuncios de USDT/COP.'))
+            return None
+        return min(precios)
+
     def _trm(self):
-        """TRM oficial, solo como valor inicial del dolar."""
+        """TRM oficial: el dolar de mercado, el que pagaria el cliente."""
         try:
             r = requests.get(API_TRM, timeout=20)
             r.raise_for_status()

@@ -236,9 +236,9 @@ class Franquicia(models.Model):
 class TasaCambio(models.Model):
     """Cuantos pesos colombianos vale una unidad de cada moneda.
 
-    Las marcadas como `manual` NO se sobrescriben al actualizar tasas: es el caso
-    del dolar, que se consigue por debajo de la TRM y cuyo costo real solo lo
-    sabe el dueno del negocio.
+    `USD` es lo que cuesta de verdad un dolar (el USDT mas barato de Binance
+    P2P, con el que se paga buysellvouchers) y `TRM` el dolar de mercado
+    oficial. Las marcadas como `manual` NO se sobrescriben al actualizar tasas.
     """
 
     moneda = models.CharField(max_length=3, primary_key=True)

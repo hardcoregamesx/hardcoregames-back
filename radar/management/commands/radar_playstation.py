@@ -129,9 +129,11 @@ class Command(BaseCommand):
                               % (tasa_ps.factor, tasas['USD'].quantize(Decimal('0.01'))))
 
         # La tienda colombiana de PS cotiza en dolares, asi que el precio de
-        # referencia hay que pasarlo a pesos. Aqui se usa el dolar de mercado,
-        # no el de saldo: es lo que pagaria el cliente comprando el solo.
-        usd_mercado = TasaCambio.objects.filter(moneda='USD').first()
+        # referencia hay que pasarlo a pesos. Aqui se usa el dolar de mercado
+        # (la TRM), no el de saldo: es lo que pagaria el cliente comprando el
+        # solo. Sin TRM guardada, el dolar del negocio.
+        usd_mercado = (TasaCambio.objects.filter(moneda='TRM').first()
+                       or TasaCambio.objects.filter(moneda='USD').first())
         usd_mercado = usd_mercado.cop_por_unidad if usd_mercado else None
         if not usd_mercado:
             raise playstation.ErrorTienda(

@@ -180,9 +180,16 @@ pesos por dolar de saldo = factor_de_la_tienda  x  TasaCambio['USD']
 ```
 
 El **factor** vive en *Tasas por tienda* y lo actualiza `radar_tasas` todos los dias. El
-**dolar de verdad** vive en *Tasas de cambio* y es manual: se siembra con la TRM, pero hay que
-editarlo con lo que de verdad cuesta conseguir divisa. Las dos casillas tienen un interruptor
-**manual** que congela el valor si se prefiere fijarlo a mano.
+**dolar de verdad** vive en *Tasas de cambio* (fila `USD`) y tambien es automatico desde el
+13/10/2026: buysellvouchers se paga con USDT, asi que es **el anuncio mas barato de USDT por
+pesos en Binance P2P**. Si Binance falla, o su precio se aleja mas de un 10% de la TRM (anuncio
+falso o API cambiada), se conserva el valor del dia anterior.
+
+La **TRM oficial** se guarda aparte, en la fila `TRM`. Es el dolar de mercado: con ella se pasa
+a pesos el precio de referencia de la tienda PS Colombia, que es lo que pagaria el cliente.
+
+Todas las casillas tienen un interruptor **manual** que congela el valor si se prefiere fijarlo
+a mano. `radar_tasas --forzar-usd` actualiza el dolar aunque este en manual y lo desmarca.
 
 Se toma la **mediana de las tres ofertas mas baratas**, no el minimo absoluto: la oferta mas
 barata suele ser de un vendedor con una unidad y mala reputacion, y fijar precios de venta con
