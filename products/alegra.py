@@ -22,7 +22,8 @@ Config por variables de entorno (hc-django.env):
   ALEGRA_ITEM_ID                id del ítem genérico "Producto digital" en Alegra
   ALEGRA_CLIENT_ID=1            id del contacto "Consumidor Final"
   ALEGRA_NUMBER_TEMPLATE_ID=15  numeración electrónica (prefijo HG)
-  ALEGRA_PAYMENT_METHOD=CASH
+  ALEGRA_FALLBACK_EMAIL         correo ficticio para cuando el del comprador sea inválido
+                                (si no se define, esas facturas se emiten sin enviar correo)
   ALEGRA_MAX_ATTEMPTS=5
 """
 import json
@@ -34,6 +35,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import close_old_connections, transaction as db_transaction
 from django.utils import timezone
 
@@ -82,6 +85,28 @@ def items_facturables(ventas_items):
     ]
 
 
+# Valores que acepta Alegra Colombia (verificado contra la API): CASH, CREDIT_CARD,
+# DEBIT_CARD, DEBIT_TRANSFER, CREDIT_TRANSFER, CHECK. Bold no distingue débito de
+# crédito, así que las tarjetas van como CREDIT_CARD. Sistecrédito es financiado.
+_TRANSFERENCIAS = ("pse", "nequi", "bancolombia", "transferencia", "breb", "daviplata", "boton")
+
+
+def metodo_pago(tx):
+    """Medio de pago de la factura según como pagó el cliente (transaction.payment_id)."""
+    pid = str(getattr(tx, "payment_id", "") or "").strip().lower()
+    if not pid:
+        return "CASH"
+    if "sistecredito" in pid:
+        return "CREDIT_TRANSFER"
+    if any(k in pid for k in _TRANSFERENCIAS):
+        return "DEBIT_TRANSFER"
+    if any(k in pid for k in ("visa", "master", "amex", "american", "diners", "card", "tarjeta", "credit")):
+        return "CREDIT_CARD"
+    if "debit" in pid:
+        return "DEBIT_CARD"
+    return "CASH"
+
+
 def construir_payload(tx, items):
     hoy = timezone.now().astimezone(TZ).date().isoformat()
     payload = {
@@ -100,7 +125,7 @@ def construir_payload(tx, items):
         "numberTemplate": {"id": int(_env("ALEGRA_NUMBER_TEMPLATE_ID", "15"))},
         "observations": f"Orden {tx.id_invoice} (transaccion {tx.pk})"[:500],
         "paymentForm": "CASH",
-        "paymentMethod": _env("ALEGRA_PAYMENT_METHOD", "CASH"),
+        "paymentMethod": metodo_pago(tx),
     }
     if stamp_mode():
         payload["status"] = "open"
@@ -178,9 +203,14 @@ def procesar(inv_id):
 def _enviar_por_correo(inv):
     """Alegra le manda la factura al comprador. Si falla no afecta la factura."""
     try:
-        email = inv.transaction.user_id.email
-        if not email:
-            return
+        email = (inv.transaction.user_id.email or "").strip()
+        try:
+            validate_email(email)
+        except ValidationError:
+            # Contador: si el correo es erróneo, enviarlo a un correo ficticio.
+            email = _env("ALEGRA_FALLBACK_EMAIL")
+            if not email:
+                return
         resp = requests.post(
             f"{API_BASE}/invoices/{inv.alegra_id}/email",
             json={"emails": [email], "invoiceType": "NATIONAL"},

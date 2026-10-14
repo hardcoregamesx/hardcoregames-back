@@ -143,3 +143,50 @@ class ProcesarTest(SimpleTestCase):
         inv.estado = AlegraInvoice.ESTADO_EMITIDA
         post, _, _ = self._run(inv, response=mock.Mock(status_code=201))
         post.assert_not_called()
+
+
+class MedioDePagoTest(SimpleTestCase):
+    def _m(self, pid):
+        return alegra.metodo_pago(SimpleNamespace(payment_id=pid))
+
+    def test_tarjetas(self):
+        for pid in ("VISA", "MASTERCARD", "AMEX", "CARD"):
+            self.assertEqual(self._m(pid), "CREDIT_CARD", pid)
+
+    def test_transferencias_y_pse(self):
+        for pid in ("PSE", "transferencia_brebb", "NEQUI", "BOTON_BANCOLOMBIA"):
+            self.assertEqual(self._m(pid), "DEBIT_TRANSFER", pid)
+
+    def test_sistecredito(self):
+        self.assertEqual(self._m("sistecredito"), "CREDIT_TRANSFER")
+
+    def test_desconocido_o_vacio_cae_en_cash(self):
+        for pid in ("", None, "algo_raro"):
+            self.assertEqual(self._m(pid), "CASH", pid)
+
+    def test_payload_usa_el_medio_real(self):
+        with mock.patch.dict(os.environ, ENV):
+            tx = SimpleNamespace(pk=1, id_invoice="x", payment_id="PSE")
+            p = alegra.construir_payload(tx, [{"descripcion": "A", "monto": 120000}])
+        self.assertEqual((p["paymentForm"], p["paymentMethod"]), ("CASH", "DEBIT_TRANSFER"))
+
+
+class CorreoTest(SimpleTestCase):
+    def _inv(self, email):
+        return SimpleNamespace(alegra_id="9", transaction=SimpleNamespace(user_id=SimpleNamespace(email=email)))
+
+    def _enviar(self, email, env=ENV):
+        with mock.patch.dict(os.environ, env),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=200)) as post:
+            alegra._enviar_por_correo(self._inv(email))
+        return post
+
+    def test_correo_valido_se_usa(self):
+        self.assertEqual(self._enviar("a@b.com").call_args.kwargs["json"]["emails"], ["a@b.com"])
+
+    def test_correo_invalido_usa_el_ficticio(self):
+        env = {**ENV, "ALEGRA_FALLBACK_EMAIL": "facturas@ejemplo.co"}
+        self.assertEqual(self._enviar("no-es-correo", env).call_args.kwargs["json"]["emails"], ["facturas@ejemplo.co"])
+
+    def test_correo_invalido_sin_ficticio_no_envia(self):
+        with mock.patch.dict(os.environ, {k: v for k, v in ENV.items()}),                 mock.patch.dict(os.environ, {"ALEGRA_FALLBACK_EMAIL": ""}):
+            self.assertFalse(self._enviar("roto").called)
