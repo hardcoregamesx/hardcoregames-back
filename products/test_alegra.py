@@ -16,21 +16,24 @@ ENV = {
 }
 
 
+FACT = {"tipo_doc": "CC", "numero": "1.114.456.688", "nombre": "  Juan  Carlos ", "apellidos": " Perez  Gomez", "email": "j@x.co"}
+
+
 def _item(monto, modo="contado", desc="Juego | Licencia | PS5"):
     return {"modo_pago": modo, "descripcion": desc, "monto": monto}
 
 
 def _tx():
-    return SimpleNamespace(pk=5, id_invoice="inv_1_abc")
+    return SimpleNamespace(pk=5, id_invoice="inv_1_abc", request=None)
 
 
 class UmbralTest(SimpleTestCase):
-    def _registrar(self, items, env=ENV):
+    def _registrar(self, items, env=ENV, facturacion=None):
         with mock.patch.dict(os.environ, env, clear=False), \
                 mock.patch.object(alegra.AlegraInvoice.objects, "get_or_create",
                                   return_value=(SimpleNamespace(pk=1), True)) as goc, \
                 mock.patch.object(alegra.threading, "Thread") as thread:
-            alegra.registrar_venta(_tx(), items)
+            alegra.registrar_venta(_tx(), items, facturacion)
             return goc.called, thread.called
 
     def test_exactamente_el_umbral_no_se_factura(self):
@@ -172,13 +175,18 @@ class MedioDePagoTest(SimpleTestCase):
 
 
 class CorreoTest(SimpleTestCase):
-    def _inv(self, email):
-        return SimpleNamespace(alegra_id="9", transaction=SimpleNamespace(user_id=SimpleNamespace(email=email)))
+    def _inv(self, email, request=None):
+        return SimpleNamespace(alegra_id="9", transaction=SimpleNamespace(
+            request=request, user_id=SimpleNamespace(email=email)))
 
-    def _enviar(self, email, env=ENV):
+    def _enviar(self, email, env=ENV, request=None):
         with mock.patch.dict(os.environ, env),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=200)) as post:
-            alegra._enviar_por_correo(self._inv(email))
+            alegra._enviar_por_correo(self._inv(email, request))
         return post
+
+    def test_el_correo_de_facturacion_tiene_prioridad(self):
+        req = json.dumps({"facturacion": {**FACT, "email": "fact@x.co"}})
+        self.assertEqual(self._enviar("cuenta@x.co", request=req).call_args.kwargs["json"]["emails"], ["fact@x.co"])
 
     def test_correo_valido_se_usa(self):
         self.assertEqual(self._enviar("a@b.com").call_args.kwargs["json"]["emails"], ["a@b.com"])
@@ -190,3 +198,108 @@ class CorreoTest(SimpleTestCase):
     def test_correo_invalido_sin_ficticio_no_envia(self):
         with mock.patch.dict(os.environ, {k: v for k, v in ENV.items()}),                 mock.patch.dict(os.environ, {"ALEGRA_FALLBACK_EMAIL": ""}):
             self.assertFalse(self._enviar("roto").called)
+
+
+
+class FacturacionDatosTest(SimpleTestCase):
+    def test_normaliza_y_limpia(self):
+        self.assertEqual(alegra.normalizar_facturacion(FACT),
+                         {"tipo_doc": "CC", "numero": "1114456688", "nombre": "Juan Carlos",
+                          "apellidos": "Perez Gomez", "email": "j@x.co"})
+
+    def test_datos_invalidos_devuelven_none(self):
+        for malo in (None, "x", {}, {**FACT, "tipo_doc": "XX"}, {**FACT, "numero": "12"},
+                     {**FACT, "numero": "abc"}, {**FACT, "nombre": "a"},
+                     {**FACT, "nombre": "Juan", "apellidos": ""}):
+            self.assertIsNone(alegra.normalizar_facturacion(malo), malo)
+
+    def test_nombre_en_un_solo_campo_separa_el_ultimo_como_apellido(self):
+        r = alegra.normalizar_facturacion({**FACT, "nombre": "Juan Carlos Perez", "apellidos": ""})
+        self.assertEqual((r["nombre"], r["apellidos"]), ("Juan Carlos", "Perez"))
+
+    def test_nit_usa_razon_social_y_no_pide_apellidos(self):
+        r = alegra.normalizar_facturacion({**FACT, "tipo_doc": "NIT", "numero": "900123456", "nombre": "Mi Empresa SAS", "apellidos": "x"})
+        self.assertEqual((r["nombre"], r["apellidos"]), ("Mi Empresa SAS", ""))
+
+    def test_correo_invalido_se_descarta_pero_la_factura_sigue(self):
+        self.assertEqual(alegra.normalizar_facturacion({**FACT, "email": "roto"})["email"], "")
+
+    def test_solo_conserva_las_cuatro_claves(self):
+        r = alegra.normalizar_facturacion({**FACT, "isAdmin": True, "x": "<script>"})
+        self.assertEqual(set(r), {"tipo_doc", "numero", "nombre", "apellidos", "email"})
+
+    def test_facturacion_de_lee_el_json_guardado(self):
+        self.assertEqual(alegra.facturacion_de(json.dumps({"facturacion": FACT}))["numero"], "1114456688")
+        self.assertIsNone(alegra.facturacion_de("no es json"))
+        self.assertIsNone(alegra.facturacion_de(None))
+
+
+class PidioFacturaTest(SimpleTestCase):
+    _registrar = UmbralTest._registrar
+
+    """Con el checkbox marcado se factura aunque no pase el tope; sin eso, el tope manda."""
+
+    def test_pidio_factura_bajo_el_tope_se_factura(self):
+        self.assertEqual(self._registrar([_item(30000)], facturacion=FACT), (True, True))
+
+    def test_no_pidio_factura_bajo_el_tope_no_se_factura(self):
+        self.assertEqual(self._registrar([_item(30000)], facturacion=None), (False, False))
+
+    def test_datos_invalidos_no_cuentan_como_pedido(self):
+        self.assertEqual(self._registrar([_item(30000)], facturacion={"tipo_doc": "CC"}), (False, False))
+
+    def test_pidio_factura_pero_no_es_de_contado_no_se_factura(self):
+        self.assertEqual(self._registrar([_item(30000, modo="cuotas")], facturacion=FACT), (False, False))
+
+
+class ClienteAlegraTest(SimpleTestCase):
+    F = alegra.normalizar_facturacion(FACT)
+
+    def test_sin_datos_es_consumidor_final(self):
+        with mock.patch.dict(os.environ, ENV):
+            self.assertEqual(alegra.cliente_alegra(None), 1)
+
+    def test_reusa_contacto_existente_por_identificacion_exacta(self):
+        resp = mock.Mock(status_code=200, json=lambda: [
+            {"id": "50", "identification": "11144566880"},  # prefijo: NO debe coincidir
+            {"id": "51", "identification": "1114456688"},
+        ])
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", return_value=resp),                 mock.patch.object(alegra.requests, "post") as post:
+            self.assertEqual(alegra.cliente_alegra(self.F), 51)
+        post.assert_not_called()
+
+    def test_nit_con_digito_de_verificacion_coincide(self):
+        f = alegra.normalizar_facturacion({**FACT, "tipo_doc": "NIT", "numero": "900123456"})
+        resp = mock.Mock(status_code=200, json=lambda: [{"id": "7", "identification": "900123456-7"}])
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", return_value=resp):
+            self.assertEqual(alegra.cliente_alegra(f), 7)
+
+    def test_crea_el_contacto_si_no_existe(self):
+        get = mock.Mock(status_code=200, json=lambda: [])
+        post = mock.Mock(status_code=201, json=lambda: {"id": "88"})
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", return_value=get),                 mock.patch.object(alegra.requests, "post", return_value=post) as p:
+            self.assertEqual(alegra.cliente_alegra(self.F), 88)
+        body = p.call_args.kwargs["json"]
+        self.assertEqual(body["identificationObject"], {"type": "CC", "number": "1114456688"})
+        self.assertEqual((body["kindOfPerson"], body["email"]), ("PERSON_ENTITY", "j@x.co"))
+        self.assertEqual(body["nameObject"], {"firstName": "Juan", "secondName": "Carlos",
+                                              "lastName": "Perez", "secondLastName": "Gomez"})
+        self.assertNotIn("name", body)
+
+    def test_nit_se_crea_como_persona_juridica(self):
+        f = alegra.normalizar_facturacion({**FACT, "tipo_doc": "NIT", "numero": "900123456"})
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [])),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=201, json=lambda: {"id": "9"})) as p:
+            alegra.cliente_alegra(f)
+        body = p.call_args.kwargs["json"]
+        self.assertEqual((body["kindOfPerson"], body["name"]), ("LEGAL_ENTITY", "Juan Carlos"))
+        self.assertNotIn("nameObject", body)
+
+    def test_error_al_crear_contacto_propaga_para_reintentar(self):
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [])),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=400, text="mal")):
+            with self.assertRaises(RuntimeError):
+                alegra.cliente_alegra(self.F)
+
+    def test_payload_usa_el_cliente_indicado(self):
+        with mock.patch.dict(os.environ, ENV):
+            p = alegra.construir_payload(_tx(), [{"descripcion": "A", "monto": 120000}], client_id=88)
+        self.assertEqual(p["client"], {"id": 88})

@@ -870,7 +870,7 @@ def confirm_sale(request_data, transaction=None):
         if hubo_no_contado:
             planes.notificar_ventas_planes(transaction, ventas_items)
 
-        alegra.registrar_venta(transaction, ventas_items)
+        alegra.registrar_venta(transaction, ventas_items, json_request.get('facturacion'))
 
         return True
     except Exception as e:
@@ -1835,9 +1835,21 @@ def generate_signature(order_id, amount, currency, secret_key):
     m.update(linked_string.encode())
     return m.hexdigest()
 
+def _facturacion_guardable(parsed_transaction):
+    """{'facturacion': {...}} validado, o {} si el comprador no pidió factura
+    electrónica o los datos no son válidos (ver alegra.normalizar_facturacion)."""
+    facturacion = alegra.normalizar_facturacion(parsed_transaction.get("facturacion"))
+    return {"facturacion": facturacion} if facturacion else {}
+
+
 def create_transaction_record(order_id, amount, request_transaction, items_calculados=None):
     parsed = json.loads(request_transaction)
     user_id = parsed["id_user"]
+    facturacion = alegra.normalizar_facturacion(parsed.get("facturacion"))
+    parsed.pop("facturacion", None)
+    if facturacion:
+        parsed["facturacion"] = facturacion
+    request_transaction = json.dumps(parsed)
     if items_calculados is not None:
         # items_calculados viaja dentro del mismo JSON que confirm_sale ya
         # sabe leer -- ver docs/cuotas-y-reserva.md §4.3.
@@ -1965,6 +1977,7 @@ def sistecredito_create(request):
         'couponCode': parsed_transaction.get('couponCode'),
         'balanceApplied': parsed_transaction.get('balanceApplied'),
         'items_calculados': items_calculados,
+        **_facturacion_guardable(parsed_transaction),
     })
 
     # Sistecrédito solo acepta alfanuméricos y guiones en invoice. Un "_" (o
@@ -2348,7 +2361,9 @@ def transferencia_create(request):
     # ignora) -- asi no hace falta ninguna columna ni migracion nueva.
     # items_calculados igual (ver docs/cuotas-y-reserva.md §4.3).
     stored_request = json.dumps({
-        **parsed_transaction, "nombre_pagador": nombre_pagador, "items_calculados": items_calculados,
+        **{k: val for k, val in parsed_transaction.items() if k != "facturacion"},
+        "nombre_pagador": nombre_pagador, "items_calculados": items_calculados,
+        **_facturacion_guardable(parsed_transaction),
     })
 
     transaction = Transactions.objects.create(
