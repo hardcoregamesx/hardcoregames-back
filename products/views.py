@@ -763,7 +763,7 @@ def system_variables(request, variable):
 
 
 FESTIVE_THEME_VARIABLE = 'tema_festivo'
-FESTIVE_THEMES = ('halloween', 'navidad')
+FESTIVE_THEMES = ('halloween', 'navidad', 'gta6')
 
 
 def festive_theme(request):

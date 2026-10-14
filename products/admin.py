@@ -432,6 +432,7 @@ FESTIVE_THEME_CHOICES = [
     ('none', 'Sin decoración (sitio normal)'),
     ('halloween', '🎃 Halloween'),
     ('navidad', '🎄 Navidad'),
+    ('gta6', '🌴 GTA VI (Vice City)'),
 ]
 
 
@@ -462,7 +463,7 @@ class SystemVariablesAdmin(admin.ModelAdmin):
         VariablesSistema.objects.get_or_create(
             nombre_variable='tema_festivo',
             defaults={
-                'descripcion': 'SWITCH: tema festivo del sitio (none / halloween / navidad)',
+                'descripcion': 'SWITCH: tema festivo del sitio (none / halloween / navidad / gta6)',
                 'valor': 'none',
                 'estado': True,
             },
