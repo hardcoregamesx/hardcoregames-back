@@ -23,7 +23,7 @@ from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
     TypeGames, GameDetail, ProductAccounts, SaleDetail, DaysForRentail, PriceForSuscription, TypeAccounts, \
     VariablesSistema, TypeSuscriptionAccounts, Transactions, Coupon, CouponRedemption
-from products import planes, emails_planes, alegra
+from products import planes, emails_planes
 from products.productSerializers import ProductsSerializer, ProductSerializer, ShoppingCarSerializer, \
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
@@ -869,8 +869,6 @@ def confirm_sale(request_data, transaction=None):
 
         if hubo_no_contado:
             planes.notificar_ventas_planes(transaction, ventas_items)
-
-        alegra.registrar_venta(transaction, ventas_items)
 
         return True
     except Exception as e:
