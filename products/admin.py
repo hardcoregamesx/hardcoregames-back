@@ -428,8 +428,46 @@ class FilesAdmin(admin.ModelAdmin):
             "El archivo fue subido. El procesamiento se está ejecutando en segundo plano. "
             "Actualiza esta lista en unos segundos para ver el resultado (cuántas cuentas se crearon y si hubo errores)."
         )
+FESTIVE_THEME_CHOICES = [
+    ('none', 'Sin decoración (sitio normal)'),
+    ('halloween', '🎃 Halloween'),
+    ('navidad', '🎄 Navidad'),
+]
+
+
+class SystemVariablesForm(forms.ModelForm):
+    class Meta:
+        model = VariablesSistema
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Para la variable del tema festivo el valor es un desplegable (el
+        # "switch"), no texto libre: evita typos que dejarían el sitio sin tema.
+        if self.instance and self.instance.nombre_variable == 'tema_festivo':
+            self.fields['valor'] = forms.ChoiceField(
+                choices=FESTIVE_THEME_CHOICES,
+                label='Tema festivo del sitio',
+                help_text='Se aplica a hardcoregames.co y a todas las landings en ~1 minuto. '
+                          '"Sin decoración" lo apaga. El campo "estado" también lo apaga si está desmarcado.',
+            )
+
+
 class SystemVariablesAdmin(admin.ModelAdmin):
+    form = SystemVariablesForm
     list_display = ['nombre_variable', 'descripcion', 'valor', 'url', 'estado']
+
+    def changelist_view(self, request, extra_context=None):
+        # Garantiza que el switch exista aunque nadie lo haya creado a mano.
+        VariablesSistema.objects.get_or_create(
+            nombre_variable='tema_festivo',
+            defaults={
+                'descripcion': 'SWITCH: tema festivo del sitio (none / halloween / navidad)',
+                'valor': 'none',
+                'estado': True,
+            },
+        )
+        return super().changelist_view(request, extra_context)
 
 
 class GameDetailStockInline(admin.TabularInline):

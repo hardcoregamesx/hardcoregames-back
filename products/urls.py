@@ -29,6 +29,7 @@ urlpatterns = [
     path("shoppingCar/", views.shopping_car, name="shopping_car"),
     path("typeAccounts/", views.type_accounts, name="type_accounts"),
     path("systemVariables/<str:variable>", views.system_variables, name="system_variables"),
+    path("festiveTheme", views.festive_theme, name="festive_theme"),
     path("systemVariablesGroup/<str:variable>", views.system_variables_group, name="system_variables_group"),
     path("sendEmail/", views.sendEmail, name="sendEmail"),
     path("manageFile/", views.manageFile, name="manageFile"),

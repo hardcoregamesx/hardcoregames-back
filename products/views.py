@@ -762,6 +762,23 @@ def system_variables(request, variable):
         return HttpResponse(JsonResponse(payload), content_type="application/json")
 
 
+FESTIVE_THEME_VARIABLE = 'tema_festivo'
+FESTIVE_THEMES = ('halloween', 'navidad')
+
+
+def festive_theme(request):
+    """Tema festivo activo del sitio (switch en el admin: Variables de sistema).
+    Siempre responde 200 con {"theme": "none"|"halloween"|...} para que los
+    frontends nunca fallen si la variable no existe o esta desactivada."""
+    var = VariablesSistema.objects.filter(nombre_variable=FESTIVE_THEME_VARIABLE, estado=True).first()
+    theme = (var.valor or '').strip().lower() if var else 'none'
+    if theme not in FESTIVE_THEMES:
+        theme = 'none'
+    response = JsonResponse({'theme': theme})
+    response['Cache-Control'] = 'public, max-age=60'
+    return response
+
+
 def system_variables_group(request, variable):
     if request.method == "GET":
         system_variables = VariablesSistema.objects.filter(nombre_variable__icontains=variable, estado=True)
