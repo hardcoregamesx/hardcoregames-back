@@ -949,3 +949,45 @@ class PaymentInstallment(models.Model):
 
     def __str__(self):
         return f'Cuota {self.numero} del plan #{self.plan_id}'
+
+
+class AlegraInvoice(models.Model):
+    """Estado de la factura electrónica (Alegra/DIAN) de una venta. Una fila por
+    Transactions facturable (contado, total > ALEGRA_MIN_AMOUNT). La unicidad de
+    `transaction` es la idempotencia: una venta nunca se factura dos veces.
+    managed = False igual que PaymentPlan: el esquema vive en
+    products/sql/2026-10-alegra-facturas.sql."""
+
+    ESTADO_PENDIENTE = 'pendiente'
+    ESTADO_EMITIDA = 'emitida'
+    ESTADO_BORRADOR = 'borrador'
+    ESTADO_FALLIDA = 'fallida'
+    ESTADO_CHOICES = (
+        (ESTADO_PENDIENTE, 'Pendiente'),
+        (ESTADO_EMITIDA, 'Emitida'),
+        (ESTADO_BORRADOR, 'Borrador (sin emitir)'),
+        (ESTADO_FALLIDA, 'Fallida (agotó reintentos)'),
+    )
+
+    id = models.AutoField(primary_key=True)
+    transaction = models.OneToOneField(
+        Transactions, on_delete=models.DO_NOTHING, db_column='transaction_id', related_name='factura_alegra',
+    )
+    estado = models.CharField(max_length=12, default=ESTADO_PENDIENTE, choices=ESTADO_CHOICES)
+    monto = models.IntegerField()
+    items_json = models.TextField(default='[]')
+    alegra_id = models.CharField(max_length=40, null=True, blank=True)
+    numero = models.CharField(max_length=40, null=True, blank=True)
+    intentos = models.IntegerField(default=0)
+    ultimo_error = models.TextField(default='', blank=True)
+    fecha_creacion = models.DateTimeField(default=timezone.now)
+    fecha_actualizacion = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = False
+        db_table = 'products_alegrainvoice'
+        verbose_name = 'factura electrónica (Alegra)'
+        verbose_name_plural = 'Facturas electrónicas (Alegra)'
+
+    def __str__(self):
+        return f'Factura Alegra tx#{self.transaction_id} ({self.estado})'
