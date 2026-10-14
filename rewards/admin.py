@@ -6,7 +6,9 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import JuegoPorVencer, PointTransaction, Roulette, RoulettePrize, RouletteSpin
+from django.utils import timezone
+
+from .models import JuegoPorVencer, PointTransaction, PrizeClaim, Roulette, RoulettePrize, RouletteSpin
 
 
 class RoulettePrizeInline(admin.TabularInline):
@@ -45,6 +47,41 @@ class RouletteSpinAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.action(description='Marcar como ENTREGADO')
+def marcar_entregado(modeladmin, request, queryset):
+    updated = queryset.filter(status__in=['UNLOCKED', 'REQUESTED']).update(
+        status='DELIVERED', delivered_at=timezone.now()
+    )
+    modeladmin.message_user(request, f'{updated} premio(s) marcado(s) como entregado.', messages.SUCCESS)
+
+
+@admin.action(description='CANCELAR (p.ej. el pedido se reembolsó)')
+def cancelar_premio(modeladmin, request, queryset):
+    updated = queryset.exclude(status='DELIVERED').update(status='CANCELLED')
+    modeladmin.message_user(request, f'{updated} premio(s) cancelado(s).', messages.SUCCESS)
+
+
+@admin.register(PrizeClaim)
+class PrizeClaimAdmin(admin.ModelAdmin):
+    """Cola de premios de la ruleta: filtra por "Solicitado" para ver lo que
+    hay que entregar por WhatsApp."""
+
+    list_display = ('prize_name', 'user', 'status', 'order_id', 'coupon', 'created_at', 'unlocked_at', 'requested_at', 'delivered_at')
+    list_filter = ('status', 'prize')
+    search_fields = ('user__username', 'user__email', 'prize_name', 'order_id', 'coupon__name_coupon')
+    date_hierarchy = 'created_at'
+    actions = [marcar_entregado, cancelar_premio]
+    readonly_fields = ('user', 'spin', 'prize', 'prize_name', 'coupon', 'order_id', 'created_at', 'unlocked_at', 'requested_at', 'delivered_at')
+    fields = readonly_fields + ('status', 'admin_notes')
+
+    def has_add_permission(self, request):
+        # Solo los crea el giro de la ruleta (FastAPI).
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False
 
 

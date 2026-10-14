@@ -23,12 +23,12 @@ from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
     TypeGames, GameDetail, ProductAccounts, SaleDetail, DaysForRentail, PriceForSuscription, TypeAccounts, \
     VariablesSistema, TypeSuscriptionAccounts, Transactions, Coupon, CouponRedemption
-from products import planes, emails_planes
+from products import planes, emails_planes, alegra
 from products.productSerializers import ProductsSerializer, ProductSerializer, ShoppingCarSerializer, \
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
 from users.models import User_Customized
-from rewards.models import PointTransaction
+from rewards.models import PointTransaction, PrizeClaim
 from membership.models import YoutubeMembershipLink, MembershipDiscountLog
 from utils.SendEmail import SendEmail
 from utils.getJsonFromRequest import GetJsonFromRequest
@@ -870,6 +870,8 @@ def confirm_sale(request_data, transaction=None):
         if hubo_no_contado:
             planes.notificar_ventas_planes(transaction, ventas_items)
 
+        alegra.registrar_venta(transaction, ventas_items)
+
         return True
     except Exception as e:
         send_email = True
@@ -1030,6 +1032,11 @@ def apply_coupon_points(coupon_code, id_user, order_id):
         coupon=coupon,
         user=instance_user,
         order_id=order_id,
+    )
+    # Cupón de premio de la ruleta (MANUAL_CLAIM): usarlo en una compra aprobada
+    # desbloquea el premio. Solo pasa de LOCKED a UNLOCKED; es idempotente.
+    PrizeClaim.objects.filter(coupon=coupon, user=instance_user, status='LOCKED').update(
+        status='UNLOCKED', order_id=order_id, unlocked_at=now()
     )
 
 

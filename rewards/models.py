@@ -145,6 +145,46 @@ class RouletteSpin(models.Model):
         return f'{self.user} → {self.prize} ({self.created_at:%Y-%m-%d %H:%M})'
 
 
+PRIZE_CLAIM_STATUSES = [
+    ('LOCKED', 'Bloqueado (cupón sin usar)'),
+    ('UNLOCKED', 'Desbloqueado (compra aprobada, falta reclamar)'),
+    ('REQUESTED', 'Solicitado por el cliente (falta entregar)'),
+    ('DELIVERED', 'Entregado'),
+    ('CANCELLED', 'Cancelado'),
+]
+
+
+class PrizeClaim(models.Model):
+    """Premio MANUAL_CLAIM (juego, Game Pass...) que el cliente reclama despues
+    de usar su cupon de compra. Lo crea hc-fastapi al girar (LOCKED); Django
+    lo pasa a UNLOCKED cuando la compra con ese cupon se aprueba
+    (products.views.apply_coupon_points) y soporte lo marca DELIVERED desde
+    aqui. Tabla creada por create_all de FastAPI: managed = False."""
+
+    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, db_column='user_id', related_name='prize_claims')
+    spin = models.OneToOneField(RouletteSpin, on_delete=models.DO_NOTHING, db_column='spin_id', related_name='prize_claim')
+    prize = models.ForeignKey(RoulettePrize, on_delete=models.DO_NOTHING, db_column='prize_id', related_name='claims')
+    prize_name = models.CharField(max_length=100)
+    coupon = models.ForeignKey(Coupon, on_delete=models.DO_NOTHING, db_column='coupon_id', null=True, blank=True, related_name='prize_claims')
+    status = models.CharField(max_length=12, choices=PRIZE_CLAIM_STATUSES, default='LOCKED')
+    order_id = models.CharField(max_length=100, null=True, blank=True)
+    created_at = models.DateTimeField()
+    unlocked_at = models.DateTimeField(null=True, blank=True)
+    requested_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        managed = False
+        db_table = 'rewards_prizeclaim'
+        verbose_name = 'premio de ruleta por reclamar'
+        verbose_name_plural = 'Premios de ruleta por reclamar'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.prize_name} - {self.user} ({self.get_status_display()})'
+
+
 class JuegosPorVencerManager(models.Manager):
     """Solo cuentas de juego individuales vendidas con modalidad de
     suscripcion (tienen fecha_vencimiento), activas todavia. Excluye
