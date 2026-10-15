@@ -360,12 +360,12 @@ class Coupon(models.Model):
             )
             if product_ids:
                 specs.append((product_ids, license_ids, duration_days))
-        # match_all_variants: each combination picked in Restricciones also
-        # stands for every combination of the same product and licencia
-        # (e.g. any duration of YouTube Premium "código").
-        if self.rules.filter(rule_type='match_all_variants').exists():
-            for producto_id, licencia_id in self.game_details.values_list('producto_id', 'licencia_id'):
-                specs.append(({producto_id}, {licencia_id}, None))
+        # Each combination picked in Restricciones stands for every
+        # combination of the same product and licencia (e.g. any duration of
+        # YouTube Premium "código"). Always on; the old match_all_variants
+        # rule is now redundant and kept only for existing data.
+        for producto_id, licencia_id in self.game_details.values_list('producto_id', 'licencia_id'):
+            specs.append(({producto_id}, {licencia_id}, None))
         return specs
 
     def is_restricted(self):

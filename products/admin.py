@@ -954,7 +954,7 @@ class CouponAdmin(admin.ModelAdmin):
             {
                 'fields': ('user', 'game_details'),
                 'description': (
-                    'Deja en blanco para que el cupón aplique a todos los usuarios / productos.'
+                    'Deja en blanco para que el cupón aplique a todos los usuarios / productos. Cada combinación elegida cubre también las demás combinaciones (duración, consola) del mismo producto y licencia.'
                 ),
             },
         ),
