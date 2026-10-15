@@ -169,6 +169,34 @@ class GameDetail(models.Model):
         product_name = self.producto.title if self.producto else 'Sin producto'
         return f"{product_name} | {self.licencia} | {self.consola} | {self.duracion_dias_alquiler}"
 
+    def heredar_cuotas(self):
+        """Copia la config de cuotas de una fila hermana (mismo producto,
+        consola, licencia y duracion) que ya la tenga activa. Cada unidad de
+        stock es una fila propia: sin esto, reponer stock crea filas con
+        cuotas apagadas y la variante deja de mostrar cuotas en el sitio."""
+        if self.licencia_id not in (1, 2) or not self.producto_id or not self.consola_id:
+            return
+        hermana = GameDetail.objects.filter(
+            producto_id=self.producto_id,
+            consola_id=self.consola_id,
+            licencia_id=self.licencia_id,
+            duracion_dias_alquiler=self.duracion_dias_alquiler,
+            cuotas_activas=True,
+            valor_cuota__gt=0,
+        ).order_by('-stock', 'id_game_detail').first()
+        if hermana:
+            self.cuotas_activas = True
+            self.num_cuotas = hermana.num_cuotas
+            self.valor_cuota = hermana.valor_cuota
+            self.cuota_inicial = hermana.cuota_inicial
+
+    def save(self, *args, **kwargs):
+        # Solo filas nuevas que no traen cuotas propias; nunca pisa una
+        # configuracion explicita ni cambia filas ya existentes.
+        if self._state.adding and not self.cuotas_activas and self.valor_cuota == 0:
+            self.heredar_cuotas()
+        super().save(*args, **kwargs)
+
     def precio_contado(self):
         """Precio de hoy si se compra de contado: el de oferta si hay una
         vigente, si no el de lista. Misma regla que usa el checkout en
