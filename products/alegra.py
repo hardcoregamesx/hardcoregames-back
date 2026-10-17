@@ -80,6 +80,10 @@ def _headers():
 
 
 TIPOS_DOC = {"CC", "NIT", "CE", "PP"}
+# Alegra rechaza la emisión si el contacto no tiene régimen fiscal ("requerido
+# cuando el tipo de identificación es CC"). Los borradores no validan esto.
+REGIMEN_PERSONA = "SIMPLIFIED_REGIME"
+REGIMEN_EMPRESA = "COMMON_REGIME"
 
 
 def normalizar_facturacion(raw):
@@ -210,15 +214,19 @@ def cliente_alegra(facturacion):
     if not facturacion:
         return int(_env("ALEGRA_CLIENT_ID", "1"))
     numero = facturacion["numero"]
+    es_empresa = facturacion["tipo_doc"] == "NIT"
+    regimen = REGIMEN_EMPRESA if es_empresa else REGIMEN_PERSONA
     r = requests.get(f"{API_BASE}/contacts", params={"identification": numero, "limit": 5},
                      headers=_headers(), timeout=TIMEOUT)
     if r.status_code < 300:
         for c in r.json() or []:
             # NIT llega como "900123456-7": se compara solo la parte antes del DV.
             if str(c.get("identification") or "").split("-")[0] == numero:
+                if not c.get("regime"):
+                    _poner_regimen(c, regimen)
                 return int(c["id"])
-    es_empresa = facturacion["tipo_doc"] == "NIT"
     body = {
+        "regime": regimen,
         "identificationObject": {"type": facturacion["tipo_doc"], "number": numero},
         "kindOfPerson": "LEGAL_ENTITY" if es_empresa else "PERSON_ENTITY",
         "type": ["client"],
@@ -237,6 +245,32 @@ def cliente_alegra(facturacion):
     if r.status_code >= 400:
         raise RuntimeError(f"Alegra contacto {r.status_code}: {r.text[:400]}")
     return int(r.json()["id"])
+
+
+def _poner_regimen(contacto, regimen):
+    """Contactos creados antes de este arreglo no tienen régimen. Alegra exige
+    reenviar el nombre en el PUT, así que se manda el que ya tiene el contacto."""
+    body = {"regime": regimen}
+    if contacto.get("nameObject"):
+        body["nameObject"] = contacto["nameObject"]
+    else:
+        body["name"] = contacto.get("name")
+    r = requests.put(f"{API_BASE}/contacts/{contacto['id']}", json=body, headers=_headers(), timeout=TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Alegra régimen del contacto {contacto['id']} {r.status_code}: {r.text[:300]}")
+
+
+def _descartar_factura_huerfana(resp):
+    """Cuando Alegra crea la factura pero no puede emitirla, responde 400 con la
+    factura creada (sin emitir). Si no se borra, cada reintento deja una más.
+    Solo se borra si de verdad quedó sin emitir."""
+    try:
+        inv = (resp.json() or {}).get("invoice") or {}
+        legal = (inv.get("stamp") or {}).get("legalStatus") or ""
+        if inv.get("id") and not legal.startswith("STAMPED"):
+            requests.delete(f"{API_BASE}/invoices/{inv['id']}", headers=_headers(), timeout=TIMEOUT)
+    except Exception:
+        logger.exception("Alegra: no se pudo descartar la factura sin emitir")
 
 
 def _procesar_en_hilo(inv_id):
@@ -263,6 +297,7 @@ def procesar(inv_id):
             payload = construir_payload(inv.transaction, json.loads(inv.items_json), client_id)
             resp = requests.post(f"{API_BASE}/invoices", json=payload, headers=_headers(), timeout=TIMEOUT)
             if resp.status_code >= 400:
+                _descartar_factura_huerfana(resp)
                 raise RuntimeError(f"Alegra {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
             inv.alegra_id = str(data.get("id"))

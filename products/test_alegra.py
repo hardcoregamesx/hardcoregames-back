@@ -262,7 +262,7 @@ class ClienteAlegraTest(SimpleTestCase):
     def test_reusa_contacto_existente_por_identificacion_exacta(self):
         resp = mock.Mock(status_code=200, json=lambda: [
             {"id": "50", "identification": "11144566880"},  # prefijo: NO debe coincidir
-            {"id": "51", "identification": "1114456688"},
+            {"id": "51", "identification": "1114456688", "regime": "SIMPLIFIED_REGIME"},
         ])
         with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", return_value=resp),                 mock.patch.object(alegra.requests, "post") as post:
             self.assertEqual(alegra.cliente_alegra(self.F), 51)
@@ -270,7 +270,8 @@ class ClienteAlegraTest(SimpleTestCase):
 
     def test_nit_con_digito_de_verificacion_coincide(self):
         f = alegra.normalizar_facturacion({**FACT, "tipo_doc": "NIT", "numero": "900123456"})
-        resp = mock.Mock(status_code=200, json=lambda: [{"id": "7", "identification": "900123456-7"}])
+        resp = mock.Mock(status_code=200, json=lambda: [
+            {"id": "7", "identification": "900123456-7", "regime": "COMMON_REGIME"}])
         with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", return_value=resp):
             self.assertEqual(alegra.cliente_alegra(f), 7)
 
@@ -303,3 +304,75 @@ class ClienteAlegraTest(SimpleTestCase):
         with mock.patch.dict(os.environ, ENV):
             p = alegra.construir_payload(_tx(), [{"descripcion": "A", "monto": 120000}], client_id=88)
         self.assertEqual(p["client"], {"id": 88})
+
+
+class RegimenTest(SimpleTestCase):
+    """Alegra rechaza la emisión si el contacto con CC no tiene régimen fiscal."""
+    F = alegra.normalizar_facturacion(FACT)
+
+    def test_contacto_nuevo_se_crea_con_regimen(self):
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [])),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=201, json=lambda: {"id": "8"})) as p:
+            alegra.cliente_alegra(self.F)
+        self.assertEqual(p.call_args.kwargs["json"]["regime"], "SIMPLIFIED_REGIME")
+
+    def test_empresa_nueva_usa_regimen_comun(self):
+        f = alegra.normalizar_facturacion({**FACT, "tipo_doc": "NIT", "numero": "900123456"})
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [])),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=201, json=lambda: {"id": "9"})) as p:
+            alegra.cliente_alegra(f)
+        self.assertEqual(p.call_args.kwargs["json"]["regime"], "COMMON_REGIME")
+
+    def test_contacto_existente_sin_regimen_se_actualiza_con_su_nombre(self):
+        viejo = {"id": "7", "identification": "1114456688", "regime": None,
+                 "nameObject": {"firstName": "Juan", "secondName": "", "lastName": "Perez", "secondLastName": ""}}
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [viejo])),                 mock.patch.object(alegra.requests, "put", return_value=mock.Mock(status_code=200)) as put:
+            self.assertEqual(alegra.cliente_alegra(self.F), 7)
+        self.assertEqual(put.call_args.args[0], f"{alegra.API_BASE}/contacts/7")
+        self.assertEqual(put.call_args.kwargs["json"], {"regime": "SIMPLIFIED_REGIME", "nameObject": viejo["nameObject"]})
+
+    def test_contacto_existente_con_regimen_no_se_toca(self):
+        ok = {"id": "7", "identification": "1114456688", "regime": "SIMPLIFIED_REGIME"}
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [ok])),                 mock.patch.object(alegra.requests, "put") as put:
+            alegra.cliente_alegra(self.F)
+        put.assert_not_called()
+
+    def test_si_falla_actualizar_el_regimen_se_propaga_para_reintentar(self):
+        viejo = {"id": "7", "identification": "1114456688", "regime": None, "name": "Empresa"}
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.requests, "get", return_value=mock.Mock(status_code=200, json=lambda: [viejo])),                 mock.patch.object(alegra.requests, "put", return_value=mock.Mock(status_code=400, text="mal")):
+            with self.assertRaises(RuntimeError):
+                alegra.cliente_alegra(self.F)
+
+
+class FacturaHuerfanaTest(SimpleTestCase):
+    """Un 400 de emisión deja la factura creada sin emitir: hay que borrarla."""
+
+    def _descartar(self, body):
+        resp = mock.Mock(json=lambda: body)
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "delete") as delete:
+            alegra._descartar_factura_huerfana(resp)
+        return delete
+
+    def test_borra_la_factura_creada_que_no_se_emitio(self):
+        d = self._descartar({"error": {"code": 3051}, "invoice": {"id": "20", "status": "draft"}})
+        self.assertEqual(d.call_args.args[0], f"{alegra.API_BASE}/invoices/20")
+
+    def test_nunca_borra_una_factura_ya_emitida(self):
+        d = self._descartar({"invoice": {"id": "4", "stamp": {"legalStatus": "STAMPED_AND_ACCEPTED"}}})
+        d.assert_not_called()
+
+    def test_sin_factura_en_la_respuesta_no_borra_nada(self):
+        self._descartar({"error": {"code": 1}}).assert_not_called()
+
+    def test_si_el_borrado_falla_no_tapa_el_error_original(self):
+        resp = mock.Mock(json=lambda: {"invoice": {"id": "9"}})
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "delete", side_effect=Exception("red")):
+            alegra._descartar_factura_huerfana(resp)  # no debe lanzar
+
+    def test_procesar_descarta_la_huerfana_cuando_alegra_responde_400(self):
+        inv = ProcesarTest()._inv()
+        resp = mock.Mock(status_code=400, text="no cumple", json=lambda: {"invoice": {"id": "20", "status": "draft"}})
+        qs = mock.MagicMock()
+        qs.select_related.return_value.filter.return_value.first.return_value = inv
+        with mock.patch.dict(os.environ, ENV),                 mock.patch.object(alegra.AlegraInvoice.objects, "select_for_update", return_value=qs),                 mock.patch.object(alegra.db_transaction, "atomic"),                 mock.patch.object(alegra.requests, "post", return_value=resp),                 mock.patch.object(alegra.requests, "delete") as delete:
+            alegra.procesar(1)
+        self.assertEqual(delete.call_args.args[0], f"{alegra.API_BASE}/invoices/20")
+        self.assertEqual(inv.estado, AlegraInvoice.ESTADO_PENDIENTE)
