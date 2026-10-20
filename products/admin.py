@@ -738,6 +738,11 @@ class SalesDetailAdmin(admin.ModelAdmin):
         ids = list(dict.fromkeys(int(x) for x in re.findall(r'\d+', request.GET.get('ids', ''))))
         productos = list(Products.objects.filter(id_product__in=ids).order_by('title'))
 
+        def wa_digits(tel):
+            d = re.sub(r'\D', '', tel)
+            # Celular colombiano guardado sin indicativo.
+            return '57' + d if len(d) == 10 and d.startswith('3') else d
+
         compradores = {}
         if productos:
             ventas = (
@@ -756,7 +761,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
                         'nombre': u.get_full_name() or u.username,
                         'email': u.email,
                         'whatsapp': tel,
-                        'wa_digits': re.sub(r'\D', '', tel),
+                        'wa_digits': wa_digits(tel),
                         'productos': [],
                         'ultima_compra': v.fecha_venta,
                     }
