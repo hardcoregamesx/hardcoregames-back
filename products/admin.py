@@ -704,7 +704,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
         messages.add_message(request, messages.INFO, 'Mensaje enviado exitosamente')
 
     actions = [send_email_renovation]
-    search_fields = ["usuario__email", "fecha_venta"]
+    search_fields = ["usuario__email", "producto__title", "cuenta__cuenta"]
     list_per_page = 10
 
     def get_urls(self):
