@@ -70,8 +70,11 @@
     var v = q.value.trim();
     if (v.length < 2) { sug.style.display = 'none'; return; }
     t = setTimeout(function(){
-      fetch('{{ buscar_url }}?q=' + encodeURIComponent(v), {credentials:'same-origin'})
-        .then(function(r){return r.json()}).then(function(d){
+      fetch('{{ buscar_url }}?q=' + encodeURIComponent(v), {credentials:'same-origin', headers:{'Accept':'application/json'}})
+        .then(function(r){
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        }).then(function(d){
           sug.innerHTML = '';
           d.results.forEach(function(p){
             var el = document.createElement('div'); el.textContent = p.title;
@@ -83,6 +86,11 @@
           });
           if (!d.results.length) sug.innerHTML = '<div>Sin resultados</div>';
           sug.style.display = 'block';
+        }).catch(function(err){
+          sug.innerHTML = '';
+          var el = document.createElement('div');
+          el.textContent = 'Error al buscar (' + err.message + '). Recarga la página e inicia sesión de nuevo.';
+          sug.appendChild(el); sug.style.display = 'block';
         });
     }, 200);
   });
