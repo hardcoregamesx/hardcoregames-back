@@ -714,62 +714,73 @@ class SalesDetailAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.compradores_view),
                 name='products_saledetail_compradores',
             ),
+            path(
+                'compradores/buscar-productos/',
+                self.admin_site.admin_view(self.buscar_productos_view),
+                name='products_saledetail_buscar_productos',
+            ),
         ] + super().get_urls()
 
+    def buscar_productos_view(self, request):
+        """Autocompletado: productos cuyo título contiene el texto."""
+        from django.http import JsonResponse
+        q = request.GET.get('q', '').strip()
+        if len(q) < 2:
+            return JsonResponse({'results': []})
+        prods = Products.objects.filter(title__icontains=q).order_by('title')[:15]
+        return JsonResponse({'results': [{'id': p.id_product, 'title': p.title} for p in prods]})
+
     def compradores_view(self, request):
-        """Compradores de uno o varios productos (por id_product)."""
+        """Correo y WhatsApp de los compradores de uno o varios productos."""
         import csv, re
         from django.http import HttpResponse
 
-        raw = request.GET.get('ids', '')
-        ids = list(dict.fromkeys(int(x) for x in re.findall(r'\d+', raw)))
-        ventas = []
-        productos = {}
-        if ids:
-            productos = {p.id_product: p for p in Products.objects.filter(id_product__in=ids)}
-            ventas = list(
-                SaleDetail.objects.filter(producto_id__in=ids)
-                .select_related('usuario', 'producto', 'cuenta', 'combinacion__consola', 'combinacion__licencia')
-                .order_by('producto_id', '-fecha_venta')
-            )
+        ids = list(dict.fromkeys(int(x) for x in re.findall(r'\d+', request.GET.get('ids', ''))))
+        productos = list(Products.objects.filter(id_product__in=ids).order_by('title'))
 
-        filas = []
-        for v in ventas:
-            u = v.usuario
-            c = v.combinacion
-            filas.append({
-                'producto_id': v.producto_id,
-                'producto': v.producto.title if v.producto else '',
-                'email': u.email if u else '',
-                'nombre': (u.get_full_name() or u.username) if u else '',
-                'fecha_venta': v.fecha_venta,
-                'vencimiento': v.fecha_vencimiento,
-                'consola': c.consola.descripcion if c and c.consola else '',
-                'licencia': c.licencia.descripcion if c and c.licencia else '',
-                'cuenta': v.cuenta.cuenta if v.cuenta else '',
-                'usuario_id': u.pk if u else None,
-            })
+        compradores = {}
+        if productos:
+            ventas = (
+                SaleDetail.objects.filter(producto_id__in=[p.id_product for p in productos], usuario__isnull=False)
+                .select_related('usuario', 'usuario__user_customized', 'producto')
+                .order_by('-fecha_venta')
+            )
+            for v in ventas:
+                u = v.usuario
+                c = compradores.get(u.pk)
+                if c is None:
+                    perfil = getattr(u, 'user_customized', None)
+                    tel = (perfil.phone_number if perfil else '') or ''
+                    c = compradores[u.pk] = {
+                        'usuario_id': u.pk,
+                        'nombre': u.get_full_name() or u.username,
+                        'email': u.email,
+                        'whatsapp': tel,
+                        'wa_digits': re.sub(r'\D', '', tel),
+                        'productos': [],
+                        'ultima_compra': v.fecha_venta,
+                    }
+                if v.producto.title not in c['productos']:
+                    c['productos'].append(v.producto.title)
+        filas = list(compradores.values())
 
         if filas and request.GET.get('csv'):
             resp = HttpResponse(content_type='text/csv; charset=utf-8')
             resp['Content-Disposition'] = 'attachment; filename="compradores.csv"'
             resp.write('﻿')
             w = csv.writer(resp)
-            w.writerow(['id_producto', 'producto', 'email', 'nombre', 'fecha_venta',
-                        'vencimiento', 'consola', 'licencia', 'cuenta'])
+            w.writerow(['nombre', 'email', 'whatsapp', 'productos', 'ultima_compra'])
             for f in filas:
-                w.writerow([f['producto_id'], f['producto'], f['email'], f['nombre'],
-                            f['fecha_venta'], f['vencimiento'], f['consola'], f['licencia'], f['cuenta']])
+                w.writerow([f['nombre'], f['email'], f['whatsapp'], ' | '.join(f['productos']), f['ultima_compra']])
             return resp
 
         context = dict(
             self.admin_site.each_context(request),
             title='Compradores por producto',
-            raw=raw,
-            ids=ids,
+            productos=productos,
+            productos_data=[{'id': p.id_product, 'title': p.title} for p in productos],
             filas=filas,
-            no_encontrados=[i for i in ids if i not in productos],
-            compradores_unicos=len({f['usuario_id'] for f in filas if f['usuario_id']}),
+            buscar_url=reverse('admin:products_saledetail_buscar_productos'),
             opts=self.model._meta,
         )
         return render(request, 'admin/products/saledetail/compradores.html', context)

@@ -2,40 +2,102 @@
 {% load i18n %}
 
 {% block content %}
-<form method="get" class="mb-3">
-  <label for="ids"><b>IDs de producto</b> (separados por coma, espacio o salto de línea)</label><br>
-  <textarea id="ids" name="ids" rows="3" class="form-control" style="max-width:600px" placeholder="12, 15, 230">{{ raw }}</textarea>
-  <button type="submit" class="btn btn-primary mt-2">Buscar compradores</button>
-  {% if filas %}<button type="submit" name="csv" value="1" class="btn btn-secondary mt-2">Descargar CSV</button>{% endif %}
+<style>
+  #hc-box{position:relative;max-width:560px}
+  #hc-sug{position:absolute;left:0;right:0;z-index:50;background:#fff;border:1px solid #ccc;border-radius:4px;max-height:280px;overflow:auto;display:none}
+  #hc-sug div{padding:6px 10px;cursor:pointer;color:#222}
+  #hc-sug div:hover{background:#e8f0fe}
+  .hc-chip{display:inline-block;background:#e8f0fe;color:#1a3d7c;border-radius:14px;padding:3px 10px;margin:0 6px 6px 0}
+  .hc-chip b{cursor:pointer;margin-left:6px}
+</style>
+
+<form method="get" id="hc-form">
+  <label><b>Producto</b> — escribe el nombre y elige de la lista (puedes agregar varios)</label>
+  <div id="hc-box">
+    <input type="text" id="hc-q" class="form-control" placeholder="Ej: FC 26, Gamepass, GTA..." autocomplete="off">
+    <div id="hc-sug"></div>
+  </div>
+  <div id="hc-chips" class="mt-2"></div>
+  <input type="hidden" name="ids" id="hc-ids">
+  <button type="submit" class="btn btn-primary">Ver compradores</button>
+  {% if filas %}<button type="submit" name="csv" value="1" class="btn btn-secondary">Descargar CSV</button>{% endif %}
 </form>
 
-{% if no_encontrados %}
-  <div class="alert alert-warning">IDs sin producto: {{ no_encontrados|join:", " }}</div>
+{% if productos %}
+<hr>
+<p><b>{{ filas|length }}</b> compradores únicos</p>
+{% if filas %}
+<div class="mb-2">
+  <button type="button" class="btn btn-sm btn-outline-primary" onclick="hcCopy('email')">Copiar correos</button>
+  <button type="button" class="btn btn-sm btn-outline-success" onclick="hcCopy('wa')">Copiar WhatsApp</button>
+</div>
+<table class="table table-striped table-sm">
+  <thead><tr><th>Comprador</th><th>Correo</th><th>WhatsApp</th><th>Productos</th><th>Última compra</th></tr></thead>
+  <tbody>
+  {% for f in filas %}
+    <tr>
+      <td><a href="{% url 'admin:auth_user_change' f.usuario_id %}">{{ f.nombre }}</a></td>
+      <td class="hc-email">{{ f.email }}</td>
+      <td>{% if f.wa_digits %}<a class="hc-wa" href="https://wa.me/{{ f.wa_digits }}" target="_blank" rel="noopener">{{ f.whatsapp }}</a>{% else %}—{% endif %}</td>
+      <td>{{ f.productos|join:", " }}</td>
+      <td>{{ f.ultima_compra|date:"d/m/Y" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p>Sin compradores para esos productos.</p>{% endif %}
 {% endif %}
 
-{% if ids %}
-  <p><b>{{ filas|length }}</b> ventas · <b>{{ compradores_unicos }}</b> compradores únicos</p>
-  <table class="table table-striped table-sm">
-    <thead><tr>
-      <th>ID</th><th>Producto</th><th>Comprador</th><th>Email</th><th>Consola</th><th>Licencia</th><th>Cuenta</th><th>Venta</th><th>Vence</th>
-    </tr></thead>
-    <tbody>
-    {% for f in filas %}
-      <tr>
-        <td>{{ f.producto_id }}</td>
-        <td>{{ f.producto }}</td>
-        <td>{% if f.usuario_id %}<a href="{% url 'admin:auth_user_change' f.usuario_id %}">{{ f.nombre }}</a>{% endif %}</td>
-        <td>{{ f.email }}</td>
-        <td>{{ f.consola }}</td>
-        <td>{{ f.licencia }}</td>
-        <td>{{ f.cuenta }}</td>
-        <td>{{ f.fecha_venta|date:"d/m/Y H:i" }}</td>
-        <td>{{ f.vencimiento|date:"d/m/Y" }}</td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="9">Sin compradores para esos IDs.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-{% endif %}
+{{ productos_data|json_script:"hc-sel" }}
+<script>
+(function(){
+  var chosen = JSON.parse(document.getElementById('hc-sel').textContent);
+  var q = document.getElementById('hc-q'), sug = document.getElementById('hc-sug'),
+      chips = document.getElementById('hc-chips'), ids = document.getElementById('hc-ids'), t;
+  function render(){
+    ids.value = chosen.map(function(c){return c.id}).join(',');
+    chips.innerHTML = '';
+    chosen.forEach(function(c, i){
+      var s = document.createElement('span'); s.className = 'hc-chip';
+      s.textContent = c.title + ' ';
+      var x = document.createElement('b'); x.textContent = '×';
+      x.onclick = function(){ chosen.splice(i,1); render(); };
+      s.appendChild(x); chips.appendChild(s);
+    });
+  }
+  q.addEventListener('input', function(){
+    clearTimeout(t);
+    var v = q.value.trim();
+    if (v.length < 2) { sug.style.display = 'none'; return; }
+    t = setTimeout(function(){
+      fetch('{{ buscar_url }}?q=' + encodeURIComponent(v), {credentials:'same-origin'})
+        .then(function(r){return r.json()}).then(function(d){
+          sug.innerHTML = '';
+          d.results.forEach(function(p){
+            var el = document.createElement('div'); el.textContent = p.title;
+            el.onclick = function(){
+              if (!chosen.some(function(c){return c.id === p.id})) chosen.push(p);
+              q.value = ''; sug.style.display = 'none'; render();
+            };
+            sug.appendChild(el);
+          });
+          if (!d.results.length) sug.innerHTML = '<div>Sin resultados</div>';
+          sug.style.display = 'block';
+        });
+    }, 200);
+  });
+  document.addEventListener('click', function(e){ if (!document.getElementById('hc-box').contains(e.target)) sug.style.display = 'none'; });
+  document.getElementById('hc-form').addEventListener('submit', function(e){
+    if (!chosen.length) { e.preventDefault(); q.focus(); }
+  });
+  window.hcCopy = function(kind){
+    var sel = kind === 'email' ? '.hc-email' : '.hc-wa';
+    var v = Array.prototype.map.call(document.querySelectorAll(sel), function(n){return n.textContent.trim()})
+      .filter(Boolean).join('
+');
+    navigator.clipboard.writeText(v);
+  };
+  render();
+})();
+</script>
 {% endblock %}
