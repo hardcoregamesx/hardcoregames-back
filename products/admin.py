@@ -707,6 +707,73 @@ class SalesDetailAdmin(admin.ModelAdmin):
     search_fields = ["usuario__email", "fecha_venta"]
     list_per_page = 10
 
+    def get_urls(self):
+        return [
+            path(
+                'compradores/',
+                self.admin_site.admin_view(self.compradores_view),
+                name='products_saledetail_compradores',
+            ),
+        ] + super().get_urls()
+
+    def compradores_view(self, request):
+        """Compradores de uno o varios productos (por id_product)."""
+        import csv, re
+        from django.http import HttpResponse
+
+        raw = request.GET.get('ids', '')
+        ids = list(dict.fromkeys(int(x) for x in re.findall(r'\d+', raw)))
+        ventas = []
+        productos = {}
+        if ids:
+            productos = {p.id_product: p for p in Products.objects.filter(id_product__in=ids)}
+            ventas = list(
+                SaleDetail.objects.filter(producto_id__in=ids)
+                .select_related('usuario', 'producto', 'cuenta', 'combinacion__consola', 'combinacion__licencia')
+                .order_by('producto_id', '-fecha_venta')
+            )
+
+        filas = []
+        for v in ventas:
+            u = v.usuario
+            c = v.combinacion
+            filas.append({
+                'producto_id': v.producto_id,
+                'producto': v.producto.title if v.producto else '',
+                'email': u.email if u else '',
+                'nombre': (u.get_full_name() or u.username) if u else '',
+                'fecha_venta': v.fecha_venta,
+                'vencimiento': v.fecha_vencimiento,
+                'consola': c.consola.descripcion if c and c.consola else '',
+                'licencia': c.licencia.descripcion if c and c.licencia else '',
+                'cuenta': v.cuenta.cuenta if v.cuenta else '',
+                'usuario_id': u.pk if u else None,
+            })
+
+        if filas and request.GET.get('csv'):
+            resp = HttpResponse(content_type='text/csv; charset=utf-8')
+            resp['Content-Disposition'] = 'attachment; filename="compradores.csv"'
+            resp.write('﻿')
+            w = csv.writer(resp)
+            w.writerow(['id_producto', 'producto', 'email', 'nombre', 'fecha_venta',
+                        'vencimiento', 'consola', 'licencia', 'cuenta'])
+            for f in filas:
+                w.writerow([f['producto_id'], f['producto'], f['email'], f['nombre'],
+                            f['fecha_venta'], f['vencimiento'], f['consola'], f['licencia'], f['cuenta']])
+            return resp
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title='Compradores por producto',
+            raw=raw,
+            ids=ids,
+            filas=filas,
+            no_encontrados=[i for i in ids if i not in productos],
+            compradores_unicos=len({f['usuario_id'] for f in filas if f['usuario_id']}),
+            opts=self.model._meta,
+        )
+        return render(request, 'admin/products/saledetail/compradores.html', context)
+
 
 # ------------------------------------------------------------------ #
 #  Cuotas y reserva (ver docs/cuotas-y-reserva.md §4.2)                #

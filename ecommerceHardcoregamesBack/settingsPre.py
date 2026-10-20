@@ -79,6 +79,7 @@ JAZZMIN_SETTINGS = {
         "copyright": "HardcoreGames",
     "topmenu_links": [
         {"name": "Inicio", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Compradores", "url": "admin:products_saledetail_compradores", "icon": "fas fa-search"},
         {"name": "Ver Sitio", "url": "https://www.hardcoregames.co", "new_window": True},
     ],
     "show_sidebar": True,
