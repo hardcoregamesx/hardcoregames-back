@@ -727,7 +727,16 @@ class SalesDetailAdmin(admin.ModelAdmin):
         q = request.GET.get('q', '').strip()
         if len(q) < 2:
             return JsonResponse({'results': []})
-        prods = Products.objects.filter(title__icontains=q).order_by('title')[:15]
+        # Cada palabra debe aparecer en el título o en algún alias del producto
+        # (en cualquier orden); si no hay nada, se reintenta ignorando espacios.
+        from django.db.models import Q, Value
+        from django.db.models.functions import Replace
+        qs = Products.objects.all()
+        for w in q.split():
+            qs = qs.filter(Q(title__icontains=w) | Q(alias_set__alias__icontains=w))
+        if not qs.exists():
+            qs = Products.objects.annotate(t_sin_espacios=Replace('title', Value(' '), Value('')))                 .filter(t_sin_espacios__icontains=q.replace(' ', ''))
+        prods = qs.distinct().order_by('title')[:15]
         return JsonResponse({'results': [{'id': p.id_product, 'title': p.title} for p in prods]})
 
     def compradores_view(self, request):
