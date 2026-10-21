@@ -101,8 +101,7 @@
   window.hcCopy = function(kind){
     var sel = kind === 'email' ? '.hc-email' : '.hc-wa';
     var v = Array.prototype.map.call(document.querySelectorAll(sel), function(n){return n.textContent.trim()})
-      .filter(Boolean).join('
-');
+      .filter(Boolean).join('\n');
     navigator.clipboard.writeText(v);
   };
   render();
