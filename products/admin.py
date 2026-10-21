@@ -750,7 +750,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
             qs = qs.filter(Q(title__icontains=w) | Q(alias_set__alias__icontains=w))
         if not qs.exists():
             qs = Products.objects.annotate(t_sin_espacios=Replace('title', Value(' '), Value('')))                 .filter(t_sin_espacios__icontains=q.replace(' ', ''))
-        prods = qs.distinct().order_by('title')[:15]
+        prods = qs.distinct().order_by('title')[:40]
         prods = list(prods)
         etiquetas = self._etiquetas_productos(prods)
         return JsonResponse({'results': [{'id': p.id_product, 'title': etiquetas[p.id_product]} for p in prods]})

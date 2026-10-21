@@ -5,14 +5,16 @@
 <style>
   #hc-box{position:relative;max-width:560px}
   #hc-sug{position:absolute;left:0;right:0;z-index:50;background:#fff;border:1px solid #ccc;border-radius:4px;max-height:280px;overflow:auto;display:none}
-  #hc-sug div{padding:6px 10px;cursor:pointer;color:#222}
-  #hc-sug div:hover{background:#e8f0fe}
+  #hc-sug label{display:flex;align-items:center;gap:8px;margin:0;padding:6px 10px;cursor:pointer;color:#222;font-weight:normal}
+  #hc-sug label:hover{background:#e8f0fe}
+  #hc-sug .hc-bar{display:flex;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid #ddd;background:#f7f7f7;position:sticky;top:0;color:#555;font-size:13px}
+  #hc-sug .hc-msg{padding:6px 10px;color:#222}
   .hc-chip{display:inline-block;background:#e8f0fe;color:#1a3d7c;border-radius:14px;padding:3px 10px;margin:0 6px 6px 0}
   .hc-chip b{cursor:pointer;margin-left:6px}
 </style>
 
 <form method="get" id="hc-form">
-  <label><b>Producto</b> — escribe el nombre y elige de la lista (puedes agregar varios)</label>
+  <label><b>Producto</b> — escribe el nombre y marca los que quieras de la lista</label>
   <div id="hc-box">
     <input type="text" id="hc-q" class="form-control" placeholder="Ej: FC 26, Gamepass, GTA..." autocomplete="off">
     <div id="hc-sug"></div>
@@ -53,7 +55,9 @@
 (function(){
   var chosen = JSON.parse(document.getElementById('hc-sel').textContent);
   var q = document.getElementById('hc-q'), sug = document.getElementById('hc-sug'),
-      chips = document.getElementById('hc-chips'), ids = document.getElementById('hc-ids'), t;
+      chips = document.getElementById('hc-chips'), ids = document.getElementById('hc-ids'),
+      box = document.getElementById('hc-box'), t, results = [];
+  function has(id){ return chosen.some(function(c){return c.id === id}); }
   function render(){
     ids.value = chosen.map(function(c){return c.id}).join(',');
     chips.innerHTML = '';
@@ -61,9 +65,39 @@
       var s = document.createElement('span'); s.className = 'hc-chip';
       s.textContent = c.title + ' ';
       var x = document.createElement('b'); x.textContent = '×';
-      x.onclick = function(){ chosen.splice(i,1); render(); };
+      x.onclick = function(){ chosen.splice(i,1); render(); drawList(); };
       s.appendChild(x); chips.appendChild(s);
     });
+  }
+  function setChecked(p, on){
+    if (on && !has(p.id)) chosen.push(p);
+    if (!on) chosen = chosen.filter(function(c){return c.id !== p.id});
+  }
+  function msg(text){
+    sug.innerHTML = '';
+    var m = document.createElement('div'); m.className = 'hc-msg'; m.textContent = text;
+    sug.appendChild(m); sug.style.display = 'block';
+  }
+  function drawList(){
+    if (!results.length) return;
+    sug.innerHTML = '';
+    var bar = document.createElement('div'); bar.className = 'hc-bar';
+    [['Marcar todos', true], ['Quitar todos', false]].forEach(function(b){
+      var btn = document.createElement('button'); btn.type = 'button';
+      btn.className = 'btn btn-sm btn-outline-secondary'; btn.textContent = b[0];
+      btn.onclick = function(){ results.forEach(function(p){ setChecked(p, b[1]); }); render(); drawList(); };
+      bar.appendChild(btn);
+    });
+    var n = document.createElement('span'); n.textContent = results.length + ' resultados';
+    bar.appendChild(n); sug.appendChild(bar);
+    results.forEach(function(p){
+      var lab = document.createElement('label');
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = has(p.id);
+      cb.onchange = function(){ setChecked(p, cb.checked); render(); };
+      var tx = document.createElement('span'); tx.textContent = p.title;
+      lab.appendChild(cb); lab.appendChild(tx); sug.appendChild(lab);
+    });
+    sug.style.display = 'block';
   }
   q.addEventListener('input', function(){
     clearTimeout(t);
@@ -75,26 +109,15 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         }).then(function(d){
-          sug.innerHTML = '';
-          d.results.forEach(function(p){
-            var el = document.createElement('div'); el.textContent = p.title;
-            el.onclick = function(){
-              if (!chosen.some(function(c){return c.id === p.id})) chosen.push(p);
-              q.value = ''; sug.style.display = 'none'; render();
-            };
-            sug.appendChild(el);
-          });
-          if (!d.results.length) sug.innerHTML = '<div>Sin resultados</div>';
-          sug.style.display = 'block';
+          results = d.results;
+          if (!results.length) { msg('Sin resultados'); return; }
+          drawList();
         }).catch(function(err){
-          sug.innerHTML = '';
-          var el = document.createElement('div');
-          el.textContent = 'Error al buscar (' + err.message + '). Recarga la página e inicia sesión de nuevo.';
-          sug.appendChild(el); sug.style.display = 'block';
+          msg('Error al buscar (' + err.message + '). Recarga la página e inicia sesión de nuevo.');
         });
     }, 200);
   });
-  document.addEventListener('click', function(e){ if (!document.getElementById('hc-box').contains(e.target)) sug.style.display = 'none'; });
+  document.addEventListener('click', function(e){ if (!box.contains(e.target)) sug.style.display = 'none'; });
   document.getElementById('hc-form').addEventListener('submit', function(e){
     if (!chosen.length) { e.preventDefault(); q.focus(); }
   });
