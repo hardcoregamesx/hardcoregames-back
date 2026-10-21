@@ -721,6 +721,20 @@ class SalesDetailAdmin(admin.ModelAdmin):
             ),
         ] + super().get_urls()
 
+    @staticmethod
+    def _etiquetas_productos(prods):
+        """{id_product: 'Título — Consola1, Consola2'} según sus combinaciones."""
+        consolas = {}
+        filas = GameDetail.objects.filter(producto_id__in=[p.id_product for p in prods])             .values_list('producto_id', 'consola__descripcion').distinct()
+        for pid, con in filas:
+            if con:
+                consolas.setdefault(pid, set()).add(con)
+        return {
+            p.id_product: (f"{p.title} — {', '.join(sorted(consolas[p.id_product]))}"
+                           if p.id_product in consolas else p.title)
+            for p in prods
+        }
+
     def buscar_productos_view(self, request):
         """Autocompletado: productos cuyo título contiene el texto."""
         from django.http import JsonResponse
@@ -737,7 +751,9 @@ class SalesDetailAdmin(admin.ModelAdmin):
         if not qs.exists():
             qs = Products.objects.annotate(t_sin_espacios=Replace('title', Value(' '), Value('')))                 .filter(t_sin_espacios__icontains=q.replace(' ', ''))
         prods = qs.distinct().order_by('title')[:15]
-        return JsonResponse({'results': [{'id': p.id_product, 'title': p.title} for p in prods]})
+        prods = list(prods)
+        etiquetas = self._etiquetas_productos(prods)
+        return JsonResponse({'results': [{'id': p.id_product, 'title': etiquetas[p.id_product]} for p in prods]})
 
     def compradores_view(self, request):
         """Correo y WhatsApp de los compradores de uno o varios productos."""
@@ -756,7 +772,8 @@ class SalesDetailAdmin(admin.ModelAdmin):
         if productos:
             ventas = (
                 SaleDetail.objects.filter(producto_id__in=[p.id_product for p in productos], usuario__isnull=False)
-                .select_related('usuario', 'usuario__user_customized', 'producto')
+                .select_related('usuario', 'usuario__user_customized', 'producto',
+                                'combinacion__consola')
                 .order_by('-fecha_venta')
             )
             for v in ventas:
@@ -774,8 +791,11 @@ class SalesDetailAdmin(admin.ModelAdmin):
                         'productos': [],
                         'ultima_compra': v.fecha_venta,
                     }
-                if v.producto.title not in c['productos']:
-                    c['productos'].append(v.producto.title)
+                cb = v.combinacion
+                consola = cb.consola.descripcion if cb and cb.consola else ''
+                etiqueta = f'{v.producto.title} ({consola})' if consola else v.producto.title
+                if etiqueta not in c['productos']:
+                    c['productos'].append(etiqueta)
         filas = list(compradores.values())
 
         if filas and request.GET.get('csv'):
@@ -792,7 +812,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
             self.admin_site.each_context(request),
             title='Compradores por producto',
             productos=productos,
-            productos_data=[{'id': p.id_product, 'title': p.title} for p in productos],
+            productos_data=[{'id': pid, 'title': t} for pid, t in self._etiquetas_productos(productos).items()],
             filas=filas,
             buscar_url=reverse('admin:products_saledetail_buscar_productos'),
             opts=self.model._meta,
