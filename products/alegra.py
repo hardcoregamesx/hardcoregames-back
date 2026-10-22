@@ -25,15 +25,20 @@ Config por variables de entorno (hc-django.env):
   ALEGRA_ITEM_ID                id del ítem genérico "Producto digital" en Alegra
   ALEGRA_CLIENT_ID=1            id del contacto "Consumidor Final"
   ALEGRA_NUMBER_TEMPLATE_ID=15  numeración electrónica (prefijo HG)
-  ALEGRA_FALLBACK_EMAIL         correo ficticio para cuando el del comprador sea inválido
-                                (si no se define, esas facturas se emiten sin enviar correo)
+  ALEGRA_EMISOR_NIT=1114456688-9    NIT que se muestra al cliente para consultar la factura en la DIAN
+  ALEGRA_ITEM_REFERENCE=HG-DIGITAL  código del producto en cada línea (regla FAZ09 de la DIAN)
+  ALEGRA_FALLBACK_EMAIL         correo para cuando el del comprador sea inválido
+                                (si no se define, no se envía el correo de la factura)
   ALEGRA_MAX_ATTEMPTS=5
 """
 import json
 import logging
 import os
+import smtplib
 import threading
 from datetime import timedelta
+from email.message import EmailMessage
+from html import escape
 from zoneinfo import ZoneInfo
 
 import requests
@@ -166,6 +171,7 @@ def construir_payload(tx, items, client_id=None):
         "items": [
             {
                 "id": int(_env("ALEGRA_ITEM_ID")),
+                "reference": _env("ALEGRA_ITEM_REFERENCE", "HG-DIGITAL")[:45],
                 "description": it["descripcion"],
                 "price": it["monto"],
                 "quantity": 1,
@@ -315,31 +321,79 @@ def procesar(inv_id):
     if inv.estado == AlegraInvoice.ESTADO_FALLIDA:
         _avisar_fallo(inv)
     elif inv.estado == AlegraInvoice.ESTADO_EMITIDA:
-        _enviar_por_correo(inv)
+        _notificar_comprador(inv)
     return inv
 
 
-def _enviar_por_correo(inv):
-    """Alegra le manda la factura al comprador. Si falla no afecta la factura."""
+DIAN_CONSULTA = "https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey="
+
+
+def _notificar_comprador(inv):
+    """Alegra ya le envía la factura por correo al cliente cuando la factura lleva
+    sus datos (verificado en los eventos CLIENT_EMAILS). Quien compra sin pedir
+    factura sale a "Consumidor Final", que no tiene correo: a ese comprador se la
+    mandamos nosotros desde la tienda. El token de Alegra no puede usar su endpoint
+    de correo (403), por eso no se intenta. Si falla no afecta la factura."""
     try:
-        fact = facturacion_de(inv.transaction.request)
-        email = ((fact or {}).get("email") or inv.transaction.user_id.email or "").strip()
+        if facturacion_de(inv.transaction.request):
+            return
+        email = (inv.transaction.user_id.email or "").strip()
         try:
             validate_email(email)
         except ValidationError:
-            # Contador: si el correo es erróneo, enviarlo a un correo ficticio.
             email = _env("ALEGRA_FALLBACK_EMAIL")
             if not email:
                 return
-        resp = requests.post(
-            f"{API_BASE}/invoices/{inv.alegra_id}/email",
-            json={"emails": [email], "invoiceType": "NATIONAL"},
-            headers=_headers(), timeout=TIMEOUT,
-        )
-        if resp.status_code >= 400:
-            logger.warning("Alegra: no se pudo enviar la factura %s por correo: %s", inv.alegra_id, resp.text[:300])
+        resp = requests.get(f"{API_BASE}/invoices/{inv.alegra_id}", params={"fields": "xml"},
+                            headers=_headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        cufe = (data.get("stamp") or {}).get("cufe") or ""
+        xml = b""
+        if data.get("xml"):
+            # El XML es un adjunto extra: si no se puede bajar, el correo sale igual
+            # con el número, el CUFE y el enlace de la DIAN.
+            try:
+                xml_resp = requests.get(data["xml"], timeout=TIMEOUT)
+                if xml_resp.ok:
+                    xml = xml_resp.content
+            except requests.RequestException:
+                logger.warning("Alegra: no se pudo bajar el XML de la factura %s", inv.alegra_id)
+        numero = inv.numero or (data.get("numberTemplate") or {}).get("fullNumber") or ""
+        _enviar_correo_factura(email, numero, inv.monto, data.get("date"), json.loads(inv.items_json), cufe, xml)
     except Exception:
-        logger.exception("Alegra: error enviando factura %s por correo", inv.alegra_id)
+        logger.exception("Alegra: no se pudo enviar al comprador la factura %s", inv.alegra_id)
+
+
+def _cop(n):
+    return "$" + f"{int(n):,}".replace(",", ".")
+
+
+def _enviar_correo_factura(destino, numero, monto, fecha, items, cufe, xml):
+    filas = "".join(f"<li>{escape(i['descripcion'])} — {_cop(i['monto'])}</li>" for i in items)
+    nit = _env("ALEGRA_EMISOR_NIT", "1114456688-9")
+    enlace = f"{DIAN_CONSULTA}{cufe}" if cufe else ""
+    cuerpo_enlace = (
+        f'<p>Para consultarla o descargarla en la DIAN entra a <a href="{enlace}">{enlace}</a> y escribe el CUFE '
+        f"y el NIT del emisor: <strong>{escape(nit)}</strong>.</p>" if enlace else "")
+    html = (f"<html><body><p>Gracias por tu compra en Hardcore Games. Esta es tu factura electrónica "
+            f"<strong>{escape(str(numero))}</strong> del {escape(str(fecha or ''))} por "
+            f"<strong>{_cop(monto)}</strong>.</p><ul>{filas}</ul>{cuerpo_enlace}"
+            f"<p>También adjuntamos el archivo XML de la factura.</p><p>CUFE: {escape(cufe)}</p></body></html>")
+    msg = EmailMessage()
+    msg["From"] = settings.FROM_EMAIL
+    msg["To"] = destino
+    msg["Subject"] = f"Tu factura electrónica {numero} - Hardcore Games"
+    msg.set_content("Tu factura electrónica de Hardcore Games está disponible en la versión HTML de este correo.")
+    msg.add_alternative(html, subtype="html")
+    if xml:
+        msg.add_attachment(xml, maintype="application", subtype="xml", filename=f"{numero or 'factura'}.xml")
+    smtp = smtplib.SMTP_SSL("smtp.gmail.com")
+    try:
+        smtp.login(settings.FROM_EMAIL, settings.PASS_SMTP)
+        smtp.send_message(msg)
+    finally:
+        smtp.quit()
 
 
 def _avisar_fallo(inv):

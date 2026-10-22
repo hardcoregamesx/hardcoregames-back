@@ -73,7 +73,7 @@ class PayloadTest(SimpleTestCase):
         self.assertNotIn("stamp", p)
         self.assertEqual(p["client"], {"id": 1})
         self.assertEqual(p["numberTemplate"], {"id": 15})
-        self.assertEqual(p["items"], [{"id": 7, "description": "A", "price": 120000, "quantity": 1}])
+        self.assertEqual(p["items"], [{"id": 7, "reference": "HG-DIGITAL", "description": "A", "price": 120000, "quantity": 1}])
         self.assertNotIn("tax", p["items"][0])
 
     def test_modo_stamp_emite_a_la_dian(self):
@@ -103,7 +103,7 @@ class ProcesarTest(SimpleTestCase):
                 mock.patch.object(alegra.db_transaction, "atomic"), \
                 mock.patch.object(alegra.requests, "post", side_effect=post_error, return_value=response) as post, \
                 mock.patch.object(alegra, "_avisar_fallo") as aviso, \
-                mock.patch.object(alegra, "_enviar_por_correo") as correo:
+                mock.patch.object(alegra, "_notificar_comprador") as correo:
             alegra.procesar(1)
         return post, aviso, correo
 
@@ -175,30 +175,92 @@ class MedioDePagoTest(SimpleTestCase):
 
 
 class CorreoTest(SimpleTestCase):
+    """Alegra envía sola la factura a clientes con datos; a Consumidor Final la envía la tienda."""
+
     def _inv(self, email, request=None):
-        return SimpleNamespace(alegra_id="9", transaction=SimpleNamespace(
-            request=request, user_id=SimpleNamespace(email=email)))
+        return SimpleNamespace(alegra_id="9", numero="HG17", monto=120000,
+                               items_json=json.dumps([{"descripcion": "Juego | PS5", "monto": 120000}]),
+                               transaction=SimpleNamespace(request=request, user_id=SimpleNamespace(email=email)))
 
-    def _enviar(self, email, env=ENV, request=None):
-        with mock.patch.dict(os.environ, env),                 mock.patch.object(alegra.requests, "post", return_value=mock.Mock(status_code=200)) as post:
-            alegra._enviar_por_correo(self._inv(email, request))
-        return post
+    API = {"date": "2026-10-22", "stamp": {"cufe": "abc123"}, "xml": "https://s3/factura.xml",
+           "numberTemplate": {"fullNumber": "HG17"}}
 
-    def test_el_correo_de_facturacion_tiene_prioridad(self):
-        req = json.dumps({"facturacion": {**FACT, "email": "fact@x.co"}})
-        self.assertEqual(self._enviar("cuenta@x.co", request=req).call_args.kwargs["json"]["emails"], ["fact@x.co"])
+    def _notificar(self, email, env=ENV, request=None, api=None):
+        get = mock.Mock(side_effect=[mock.Mock(status_code=200, json=lambda: api or self.API, raise_for_status=lambda: None),
+                                     mock.Mock(ok=True, content=b"<xml/>")])
+        with mock.patch.dict(os.environ, env), mock.patch.object(alegra.requests, "get", get),                 mock.patch.object(alegra, "_enviar_correo_factura") as enviar:
+            alegra._notificar_comprador(self._inv(email, request))
+        return enviar
 
-    def test_correo_valido_se_usa(self):
-        self.assertEqual(self._enviar("a@b.com").call_args.kwargs["json"]["emails"], ["a@b.com"])
+    def test_consumidor_final_recibe_la_factura_de_la_tienda(self):
+        e = self._notificar("comprador@x.co")
+        e.assert_called_once()
+        destino, numero, monto, fecha, items, cufe, xml = e.call_args.args
+        self.assertEqual((destino, numero, monto, cufe, xml), ("comprador@x.co", "HG17", 120000, "abc123", b"<xml/>"))
 
-    def test_correo_invalido_usa_el_ficticio(self):
+    def test_cliente_con_datos_no_recibe_duplicado_porque_alegra_ya_se_la_envia(self):
+        req = json.dumps({"facturacion": FACT})
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get") as get,                 mock.patch.object(alegra, "_enviar_correo_factura") as enviar:
+            alegra._notificar_comprador(self._inv("cuenta@x.co", req))
+        get.assert_not_called()
+        enviar.assert_not_called()
+
+    def test_correo_invalido_usa_el_alterno(self):
         env = {**ENV, "ALEGRA_FALLBACK_EMAIL": "facturas@ejemplo.co"}
-        self.assertEqual(self._enviar("no-es-correo", env).call_args.kwargs["json"]["emails"], ["facturas@ejemplo.co"])
+        self.assertEqual(self._notificar("no-es-correo", env).call_args.args[0], "facturas@ejemplo.co")
 
-    def test_correo_invalido_sin_ficticio_no_envia(self):
-        with mock.patch.dict(os.environ, {k: v for k, v in ENV.items()}),                 mock.patch.dict(os.environ, {"ALEGRA_FALLBACK_EMAIL": ""}):
-            self.assertFalse(self._enviar("roto").called)
+    def test_correo_invalido_sin_alterno_no_envia(self):
+        with mock.patch.dict(os.environ, {**ENV, "ALEGRA_FALLBACK_EMAIL": ""}),                 mock.patch.object(alegra.requests, "get") as get,                 mock.patch.object(alegra, "_enviar_correo_factura") as enviar:
+            alegra._notificar_comprador(self._inv("roto"))
+        get.assert_not_called()
+        enviar.assert_not_called()
 
+    def test_no_usa_el_endpoint_de_correo_de_alegra_que_el_token_no_permite(self):
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "post") as post:
+            self._notificar("a@b.com")
+        post.assert_not_called()
+
+    def test_si_el_xml_no_se_puede_bajar_el_correo_sale_igual_sin_adjunto(self):
+        get = mock.Mock(side_effect=[mock.Mock(status_code=200, json=lambda: self.API, raise_for_status=lambda: None),
+                                     alegra.requests.ConnectionError("dns")])
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", get),                 mock.patch.object(alegra, "_enviar_correo_factura") as enviar:
+            alegra._notificar_comprador(self._inv("comprador@x.co"))
+        enviar.assert_called_once()
+        self.assertEqual(enviar.call_args.args[6], b"")  # sin xml
+        self.assertEqual(enviar.call_args.args[5], "abc123")  # pero con CUFE
+
+    def test_si_algo_falla_no_lanza(self):
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(alegra.requests, "get", side_effect=Exception("red")):
+            alegra._notificar_comprador(self._inv("a@b.com"))  # no debe lanzar
+
+    def test_el_correo_incluye_cufe_enlace_de_la_dian_y_xml_adjunto(self):
+        smtp = mock.MagicMock()
+        with mock.patch.object(alegra.smtplib, "SMTP_SSL", return_value=smtp),                 mock.patch.object(alegra.settings, "FROM_EMAIL", "tienda@x.co", create=True),                 mock.patch.object(alegra.settings, "PASS_SMTP", "pw", create=True):
+            alegra._enviar_correo_factura("c@x.co", "HG17", 120000, "2026-10-22",
+                                          [{"descripcion": "Juego <PS5>", "monto": 120000}], "abc123", b"<xml/>")
+        msg = smtp.send_message.call_args.args[0]
+        cuerpo = msg.get_body(("html",)).get_content()
+        self.assertEqual((msg["To"], msg["Subject"]), ("c@x.co", "Tu factura electrónica HG17 - Hardcore Games"))
+        self.assertIn("$120.000", cuerpo)
+        self.assertIn("documentkey=abc123", cuerpo)
+        self.assertIn("1114456688-9", cuerpo)  # el NIT del emisor que pide el formulario de la DIAN
+        self.assertIn("CUFE: abc123", cuerpo)
+        self.assertIn("&lt;PS5&gt;", cuerpo)  # el texto del producto se escapa
+        adjuntos = [part.get_filename() for part in msg.iter_attachments()]
+        self.assertEqual(adjuntos, ["HG17.xml"])
+        smtp.quit.assert_called_once()
+
+
+class ReferenciaPorLineaTest(SimpleTestCase):
+    def test_cada_linea_lleva_el_codigo_del_producto(self):
+        with mock.patch.dict(os.environ, ENV):
+            p = alegra.construir_payload(_tx(), [{"descripcion": "A", "monto": 1}, {"descripcion": "B", "monto": 2}])
+        self.assertEqual([i["reference"] for i in p["items"]], ["HG-DIGITAL", "HG-DIGITAL"])
+
+    def test_el_codigo_se_puede_configurar_y_se_recorta_a_45(self):
+        with mock.patch.dict(os.environ, {**ENV, "ALEGRA_ITEM_REFERENCE": "X" * 80}):
+            p = alegra.construir_payload(_tx(), [{"descripcion": "A", "monto": 1}])
+        self.assertEqual(len(p["items"][0]["reference"]), 45)
 
 
 class FacturacionDatosTest(SimpleTestCase):
