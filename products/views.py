@@ -23,7 +23,7 @@ from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
     TypeGames, GameDetail, ProductAccounts, SaleDetail, DaysForRentail, PriceForSuscription, TypeAccounts, \
     VariablesSistema, TypeSuscriptionAccounts, Transactions, Coupon, CouponRedemption
-from products import planes, emails_planes, alegra
+from products import planes, emails_planes, alegra, alianzas
 from products.productSerializers import ProductsSerializer, ProductSerializer, ShoppingCarSerializer, \
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
@@ -880,7 +880,11 @@ def confirm_sale(request_data, transaction=None):
         deduct_balance_exchange(id_user, json_request.get('balanceApplied') or 0)
 
         if message_html or cuotas_plan_html:
-            send_email_notification(id_user, message_html + cuotas_plan_html)
+            try:
+                alianzas_html = alianzas.bloque_correo()
+            except Exception:
+                alianzas_html = ""  # el aviso de aliados nunca debe romper la venta
+            send_email_notification(id_user, message_html + cuotas_plan_html + alianzas_html)
         for plan in reserva_planes:
             emails_planes.enviar_correo_reserva_confirmada(user, plan)
 

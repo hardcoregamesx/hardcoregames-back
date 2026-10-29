@@ -1,6 +1,6 @@
 from django.urls import path
 
-from products import views, views_planes
+from products import views, views_alianzas, views_planes
 
 urlpatterns = [
     path("getAllProducts/", views.get_all_products, name="get_all_products"),
@@ -52,4 +52,8 @@ urlpatterns = [
     path("planes/cuotaTransferenciaCreate/", views_planes.cuota_transferencia_create,
         name="cuota_transferencia_create"),
     path("planes/cuotaBoldHash/", views_planes.cuota_bold_hash, name="cuota_bold_hash"),
+    # Beneficios aliados: ver products/alianzas.py
+    path("beneficios-aliados/", views_alianzas.beneficios_aliados, name="beneficios_aliados"),
+    path("beneficios-aliados/<int:aliado_id>/apertura/", views_alianzas.apertura_aliado,
+        name="apertura_aliado"),
 ]

@@ -110,3 +110,22 @@ def beneficios_para(user, hoy=None):
         }
         resultado.append(item)
     return resultado
+
+
+def bloque_correo():
+    """HTML que se agrega al correo de confirmacion de compra. Vacio mientras
+    el lanzamiento no este abierto (ALIANZAS_ABIERTO=1) o no haya aliados."""
+    import os
+
+    from products.models import Aliado
+
+    if os.environ.get("ALIANZAS_ABIERTO") != "1" or not Aliado.objects.filter(activo=True).exists():
+        return ""
+    return (
+        '<div style="margin:24px 0;padding:16px;border-radius:12px;background:#f4f1ff;text-align:center">'
+        '<p style="margin:0 0 8px;font-size:16px;font-weight:bold">&iexcl;Desbloqueaste tus beneficios del mes!</p>'
+        '<p style="margin:0 0 12px">Descuentos en negocios aliados, solo para clientes de Hardcore Games.</p>'
+        '<a href="https://www.hardcoregames.co/beneficios" style="display:inline-block;padding:10px 20px;'
+        'border-radius:8px;background:#6d28d9;color:#fff;text-decoration:none">Ver mis beneficios</a>'
+        '</div>'
+    )
