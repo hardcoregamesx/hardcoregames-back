@@ -1019,3 +1019,51 @@ class AlegraInvoice(models.Model):
 
     def __str__(self):
         return f'Factura Alegra tx#{self.transaction_id} ({self.estado})'
+
+
+class Aliado(models.Model):
+    """Negocio aliado cuyo codigo de descuento se desbloquea al comprar en HG.
+    Tabla creada a mano (products/sql/2026-10-alianzas.sql), managed = False
+    por la misma razon que PaymentPlan."""
+
+    id = models.AutoField(primary_key=True)
+    nombre = models.CharField(max_length=120)
+    categoria = models.CharField(max_length=60, default='', blank=True)
+    logo_url = models.CharField(max_length=500, default='', blank=True)
+    beneficio = models.CharField(max_length=200, help_text='Ej.: 15% en ropa deportiva')
+    condiciones = models.TextField(default='', blank=True)
+    secreto = models.IntegerField(
+        help_text='3 digitos (100-999). Solo lo conocen el aliado y HG: con el se calcula el codigo del mes.')
+    codigo_fijo = models.CharField(
+        max_length=40, default='', blank=True,
+        help_text='Si lo llenas, reemplaza al codigo automatico (no cambia cada mes).')
+    activo = models.BooleanField(default=True)
+    orden = models.IntegerField(default=0)
+    fecha_creacion = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = False
+        db_table = 'products_aliado'
+        verbose_name = 'aliado'
+        verbose_name_plural = 'Aliados (beneficios)'
+
+    def __str__(self):
+        return self.nombre
+
+    def clean(self):
+        if self.secreto is not None and not 100 <= self.secreto <= 999:
+            raise ValidationError({'secreto': 'Debe tener 3 digitos (100 a 999).'})
+
+
+class AliadoApertura(models.Model):
+    """Una apertura de la tarjeta de un aliado por un cliente desbloqueado."""
+
+    id = models.AutoField(primary_key=True)
+    aliado = models.ForeignKey(Aliado, on_delete=models.DO_NOTHING, db_column='aliado_id', related_name='aperturas')
+    user = models.ForeignKey(User, on_delete=models.DO_NOTHING, db_column='user_id')
+    mes = models.DateField()
+    fecha = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = False
+        db_table = 'products_aliadoapertura'

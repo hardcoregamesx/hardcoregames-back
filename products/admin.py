@@ -19,7 +19,7 @@ from products.formProducts import ProductsFormCreate
 from products.managePriceFile import ManegePricesFile
 from products.models import Products, ProductsType, SaleDetail, ProductAccounts, Files, GameDetail, Consoles, \
     TypeGames, VariablesSistema, Licenses, TypeAccounts, Coupon, CouponRule, CouponRedemption, ProductoDestacado, \
-    GameDetailInventario, ProductAlias, CouponPurgeLog, ProductoOfertaSemana, PaymentPlan, PaymentInstallment
+    GameDetailInventario, ProductAlias, CouponPurgeLog, ProductoOfertaSemana, PaymentPlan, PaymentInstallment, Aliado
 from django.contrib.admin import DateFieldListFilter
 from products.UpdateProductForm import UpdateProductForm
 @admin.action(description="Update price and other fields")
@@ -1403,3 +1403,15 @@ class CouponPurgeLogAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(Aliado)
+class AliadoAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'categoria', 'beneficio', 'activo', 'orden', 'codigo_este_mes')
+    list_filter = ('activo', 'categoria')
+    search_fields = ('nombre', 'beneficio')
+
+    @admin.display(description='Codigo este mes')
+    def codigo_este_mes(self, obj):
+        from products.alianzas import codigo_del_mes, hoy_colombia
+        return codigo_del_mes(obj, hoy_colombia())
