@@ -92,6 +92,12 @@ def fin_de_mes(hoy=None):
     return _mes_siguiente(hoy) - timedelta(days=1)
 
 
+def _url_segura(url):
+    """Solo http(s): el campo lo llena un humano en el admin y se pinta como href."""
+    url = (url or "").strip()
+    return url if url.lower().startswith(("https://", "http://")) else ""
+
+
 def beneficios_para(user, hoy=None):
     """Lista para el frontend. El codigo solo viaja si `user` esta desbloqueado."""
     from products.models import Aliado
@@ -103,7 +109,7 @@ def beneficios_para(user, hoy=None):
     for a in Aliado.objects.filter(activo=True).order_by("orden", "nombre"):
         item = {
             "id": a.id, "nombre": a.nombre, "categoria": a.categoria,
-            "logo_url": a.logo_url, "beneficio": a.beneficio,
+            "logo_url": a.logo_url, "url": _url_segura(a.url), "beneficio": a.beneficio,
             "condiciones": a.condiciones, "desbloqueado": desbloqueado,
             "vence": vence if desbloqueado else None,
             "codigo": codigo_del_mes(a, hoy) if desbloqueado else None,

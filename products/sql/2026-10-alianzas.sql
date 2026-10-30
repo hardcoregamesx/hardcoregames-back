@@ -28,3 +28,7 @@ CREATE TABLE IF NOT EXISTS products_aliadoapertura (
 );
 CREATE INDEX IF NOT EXISTS products_aliadoapertura_aliado_mes
   ON products_aliadoapertura (aliado_id, mes);
+
+-- Pagina del aliado (sitio web o Instagram) a la que lleva el boton de la tarjeta.
+ALTER TABLE products_aliado
+  ADD COLUMN IF NOT EXISTS url varchar(300) NOT NULL DEFAULT '';

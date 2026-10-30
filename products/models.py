@@ -1030,6 +1030,8 @@ class Aliado(models.Model):
     nombre = models.CharField(max_length=120)
     categoria = models.CharField(max_length=60, default='', blank=True)
     logo_url = models.CharField(max_length=500, default='', blank=True)
+    url = models.URLField(max_length=300, default='', blank=True,
+                          help_text='Pagina del aliado (sitio web o Instagram). Debe empezar por https://')
     beneficio = models.CharField(max_length=200, help_text='Ej.: 15% en ropa deportiva')
     condiciones = models.TextField(default='', blank=True)
     secreto = models.IntegerField(
