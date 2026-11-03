@@ -748,6 +748,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
 
         if request.method == 'POST':
             titulo = producto.title if producto else 'producto'
+            reponer_stock = bool(aplica and combinacion and request.POST.get('reponer_stock'))
             with transaction.atomic():
                 if puntos and usuario:
                     perfil = User_Customized.objects.select_for_update().filter(user=usuario).first()
@@ -765,13 +766,13 @@ class SalesDetailAdmin(admin.ModelAdmin):
                             description='Venta cancelada: %s' % titulo,
                             created_at=now(),
                         )
-                if aplica and combinacion:
+                if reponer_stock:
                     GameDetail.objects.filter(pk=combinacion.pk).update(stock=F('stock') + 1)
                 venta.delete()
             messages.success(
                 request,
-                'Venta cancelada: se quitaron %s puntos, se retiro del panel del cliente '
-                'y se devolvio 1 unidad al stock.' % puntos)
+                'Venta cancelada: se quitaron %s puntos y se retiro del panel del cliente%s.'
+                % (puntos, ' y se devolvio 1 unidad al stock' if reponer_stock else '; el stock no se modifico'))
             return redirect(reverse('admin:products_saledetail_changelist'))
 
         context = {
