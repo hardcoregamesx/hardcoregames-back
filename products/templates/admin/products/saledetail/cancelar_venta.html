@@ -1,0 +1,23 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div style="max-width:700px;">
+  <p>¿Seguro que quieres cancelar la venta <strong>#{{ venta.pk }}</strong>?</p>
+  <ul>
+    <li>Producto: <strong>{{ venta.producto.title }}</strong></li>
+    <li>Cliente: <strong>{{ venta.usuario.email }}</strong></li>
+    <li>Cuenta: {{ venta.cuenta.cuenta }}</li>
+  </ul>
+  <p>Esto hará lo siguiente, y no se puede deshacer:</p>
+  <ul>
+    <li>Quitará <strong>{{ puntos }}</strong> puntos al cliente (queda registrado en el ledger de puntos).</li>
+    <li>Retirará el producto del panel del cliente.</li>
+    <li>{% if devuelve_stock %}Devolverá 1 unidad al stock de la combinación.{% else %}No modifica el stock.{% endif %}</li>
+  </ul>
+  <form method="post">
+    {% csrf_token %}
+    <input type="submit" value="Sí, cancelar venta" style="background:#c0392b;color:#fff;">
+    <a href="{{ change_url }}" style="margin-left:16px;">No, volver</a>
+  </form>
+</div>
+{% endblock %}

@@ -706,9 +706,92 @@ class SalesDetailAdmin(admin.ModelAdmin):
     actions = [send_email_renovation]
     search_fields = ["usuario__email", "producto__title", "cuenta__cuenta"]
     list_per_page = 10
+    readonly_fields = ('cancelar_venta_boton',)
+
+    def cancelar_venta_boton(self, obj):
+        if not obj or not obj.pk:
+            return '-'
+        url = reverse('admin:products_saledetail_cancelar', args=[obj.pk])
+        return format_html(
+            '<a class="button" href="{}" style="background:#c0392b;color:#fff;'
+            'padding:8px 14px;border-radius:4px;">Cancelar venta</a>', url)
+    cancelar_venta_boton.short_description = 'Cancelar venta'
+
+    def cancelar_venta_view(self, request, object_id):
+        """Anula una venta: quita los puntos que dio, la retira del panel del
+        cliente (borra el SaleDetail, que es lo que lista sales_by_user) y
+        devuelve la unidad al stock. Todo en una transaccion."""
+        from django.db import transaction
+        from django.db.models import F
+        from django.utils.timezone import now
+        from products.models import PaymentPlan
+        from rewards.models import PointTransaction
+        from users.models import User_Customized
+
+        venta = get_object_or_404(SaleDetail, pk=object_id)
+        change_url = reverse('admin:products_saledetail_change', args=[venta.pk])
+        usuario = venta.usuario
+        combinacion = venta.combinacion
+        producto = venta.producto
+        # Misma regla que confirm_sale: a superusuarios no se les descuenta
+        # stock ni se les dan puntos, asi que tampoco se revierte.
+        aplica = bool(usuario and not usuario.is_superuser)
+        puntos = (producto.puntos_venta or 0) if (aplica and producto) else 0
+        plan = PaymentPlan.objects.filter(saledetail_id=venta.pk).first()
+
+        if plan is not None:
+            messages.error(
+                request,
+                'Esta venta pertenece al plan de pago #%s (cuotas/reserva). '
+                'Cancelala desde Planes de pago.' % plan.pk)
+            return redirect(change_url)
+
+        if request.method == 'POST':
+            titulo = producto.title if producto else 'producto'
+            with transaction.atomic():
+                if puntos and usuario:
+                    perfil = User_Customized.objects.select_for_update().filter(user=usuario).first()
+                    if perfil:
+                        quitar = min(puntos, max(perfil.puntos or 0, 0))
+                        User_Customized.objects.filter(pk=perfil.pk).update(puntos=F('puntos') - quitar)
+                        perfil.refresh_from_db()
+                        PointTransaction.objects.create(
+                            user=usuario,
+                            delta=-quitar,
+                            balance_after=perfil.puntos,
+                            reason='REFUND',
+                            reference_type='sale_cancel',
+                            reference_id=str(venta.pk),
+                            description='Venta cancelada: %s' % titulo,
+                            created_at=now(),
+                        )
+                if aplica and combinacion:
+                    GameDetail.objects.filter(pk=combinacion.pk).update(stock=F('stock') + 1)
+                venta.delete()
+            messages.success(
+                request,
+                'Venta cancelada: se quitaron %s puntos, se retiro del panel del cliente '
+                'y se devolvio 1 unidad al stock.' % puntos)
+            return redirect(reverse('admin:products_saledetail_changelist'))
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Cancelar venta #%s' % venta.pk,
+            'venta': venta,
+            'puntos': puntos,
+            'devuelve_stock': bool(aplica and combinacion),
+            'change_url': change_url,
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/products/saledetail/cancelar_venta.html', context)
 
     def get_urls(self):
         return [
+            path(
+                '<path:object_id>/cancelar/',
+                self.admin_site.admin_view(self.cancelar_venta_view),
+                name='products_saledetail_cancelar',
+            ),
             path(
                 'compradores/',
                 self.admin_site.admin_view(self.compradores_view),
