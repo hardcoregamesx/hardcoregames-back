@@ -746,6 +746,25 @@ class SalesDetailAdmin(admin.ModelAdmin):
                 'Cancelala desde Planes de pago.' % plan.pk)
             return redirect(change_url)
 
+        # La transaccion aprobada de esta compra (SaleDetail no la guarda):
+        # del mismo cliente, que incluya esta combinacion, la mas cercana a la venta.
+        transaccion = None
+        if usuario and combinacion:
+            from products.models import Transactions
+            candidatas = Transactions.objects.filter(
+                user_id=usuario, status__iexact='approved',
+                date_transaction__lte=venta.fecha_venta + timedelta(hours=1),
+            ).order_by('-date_transaction')[:30]
+            import json
+            for t in candidatas:
+                try:
+                    items = json.loads(t.request or '{}').get('data', [])
+                except ValueError:
+                    continue
+                if any(str(i.get('id_combination')) == str(combinacion.pk) for i in items):
+                    transaccion = t
+                    break
+
         if request.method == 'POST':
             titulo = producto.title if producto else 'producto'
             reponer_stock = bool(aplica and combinacion and request.POST.get('reponer_stock'))
@@ -773,6 +792,18 @@ class SalesDetailAdmin(admin.ModelAdmin):
                 request,
                 'Venta cancelada: se quitaron %s puntos y se retiro del panel del cliente%s.'
                 % (puntos, ' y se devolvio 1 unidad al stock' if reponer_stock else '; el stock no se modifico'))
+            if transaccion is not None:
+                from products import planes
+                estado, detalle = planes.cancelar_en_ventas(transaccion.id_invoice)
+                if estado in ('cancelada', 'ya_cancelada'):
+                    messages.success(request, 'Tambien se cancelo en el sistema de ventas.')
+                else:
+                    messages.warning(request, 'NO se pudo cancelar en el sistema de ventas (%s: %s). '
+                                              'Cancelala a mano alla (referencia %s).'
+                                     % (estado, detalle, transaccion.id_invoice))
+            else:
+                messages.warning(request, 'No se encontro la transaccion de esta compra: '
+                                          'cancela la venta a mano en el sistema de ventas.')
             return redirect(reverse('admin:products_saledetail_changelist'))
 
         context = {
@@ -781,6 +812,7 @@ class SalesDetailAdmin(admin.ModelAdmin):
             'venta': venta,
             'puntos': puntos,
             'devuelve_stock': bool(aplica and combinacion),
+            'transaccion': transaccion,
             'change_url': change_url,
             'opts': self.model._meta,
         }

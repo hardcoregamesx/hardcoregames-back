@@ -12,6 +12,7 @@
   <ul>
     <li>Quitará <strong>{{ puntos }}</strong> puntos al cliente (queda registrado en el ledger de puntos).</li>
     <li>Retirará el producto del panel del cliente.</li>
+  <li>{% if transaccion %}Se cancelará también en el sistema de ventas (referencia {{ transaccion.id_invoice }}).{% else %}No se encontró la transacción de esta compra: tendrás que cancelarla a mano en ventas.{% endif %}</li>
   </ul>
   <form method="post">
     {% csrf_token %}

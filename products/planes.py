@@ -244,6 +244,29 @@ def notificar_ventas_planes(transaction, items):
         )
 
 
+VENTAS_CANCELAR_WEBHOOK_URL = os.getenv(
+    "VENTAS_CANCELAR_WEBHOOK_URL", "https://ventas.srv936408.hstgr.cloud/webhooks/cancelar/"
+)
+
+
+def cancelar_en_ventas(referencia):
+    """Pide al modulo de ventas cancelar la Venta de esa referencia (id_invoice
+    de la transaccion). Devuelve (status, detalle); status 'error' si no se
+    pudo hablar con ventas. Nunca lanza."""
+    try:
+        headers = {"X-Planes-Token": VENTAS_PLANES_WEBHOOK_SECRET} if VENTAS_PLANES_WEBHOOK_SECRET else {}
+        response = requests.post(
+            VENTAS_CANCELAR_WEBHOOK_URL, json={"referencia": referencia}, headers=headers, timeout=15
+        )
+        if not response.ok:
+            return "error", "ventas respondio %s" % response.status_code
+        data = response.json()
+        return data.get("status", "error"), data.get("detalle", "")
+    except Exception as exc:
+        logger.exception("No se pudo cancelar en ventas la referencia %s", referencia)
+        return "error", str(exc)
+
+
 def confirm_installment_payment(transaction):
     """Confirma el pago de una cuota siguiente (o el saldo de una reserva),
     ya verificado por el webhook correspondiente (Bold o transferencia). Ver
