@@ -12,6 +12,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.urls import reverse, path
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.shortcuts import redirect, get_object_or_404, render
 
 from products.accountProductForm import AccountProductForm, FileForm
@@ -372,6 +373,45 @@ class GameDetailAdmin(admin.ModelAdmin):
     def account_stock(self, obj):
         return obj.stock
 
+    @admin.display(description='Cuentas con stock disponible')
+    def cuentas_disponibles(self, obj):
+        """Todas las cuentas con stock > 0 del mismo grupo que edita este
+        formulario (producto + licencia + duración, igual que save_model)."""
+        if not obj or not obj.pk or not obj.producto_id:
+            return '—'
+        filas = (
+            GameDetail.objects.filter(
+                producto_id=obj.producto_id,
+                licencia_id=obj.licencia_id,
+                duracion_dias_alquiler=obj.duracion_dias_alquiler,
+                stock__gt=0,
+                cuenta__isnull=False,
+            )
+            .select_related('cuenta', 'cuenta__tipo_cuenta', 'consola')
+            .order_by('cuenta__cuenta', 'id_game_detail')
+        )
+        filas = list(filas)
+        if not filas:
+            return 'No hay cuentas con stock disponible para esta combinación.'
+        filas_html = []
+        for gd in filas:
+            c = gd.cuenta
+            url = reverse('admin:products_productaccounts_change', args=[c.id_product_accounts])
+            filas_html.append(format_html(
+                '<tr><td><a href="{}" target="_blank">{}</a></td><td>{}</td><td>{}</td>'
+                '<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><b>{}</b></td></tr>',
+                url, c.cuenta, c.password or '—', c.tipo_cuenta,
+                'Sí' if c.activa else 'No', c.dias_duracion if c.dias_duracion is not None else '—',
+                c.codigo_seguridad or '—', gd.consola or '—', gd.stock,
+            ))
+        total = sum(gd.stock for gd in filas)
+        return format_html(
+            '<table><thead><tr><th>Cuenta</th><th>Contraseña</th><th>Tipo</th><th>Activa</th>'
+            '<th>Días</th><th>Código seguridad</th><th>Consola</th><th>Stock</th></tr></thead>'
+            '<tbody>{}</tbody></table><p><b>{} cuenta(s) · stock total: {}</b></p>',
+            mark_safe(''.join(filas_html)), len(filas), total,
+        )
+
     product.short_description = 'Producto'
     search_fields = ['producto__title', 'producto__id_product', 'cuenta__cuenta']
     list_filter = ["consola", 'licencia']
@@ -379,14 +419,14 @@ class GameDetailAdmin(admin.ModelAdmin):
     list_display = ('consola', 'licencia', 'precio')
     actions = [update_game_detail]
     list_per_page = 10
-    readonly_fields = ('account_name', 'account_password', 'account_stock')
+    readonly_fields = ('account_name', 'account_password', 'account_stock', 'cuentas_disponibles')
     fieldsets = (
         (None, {
             'fields': ('producto', 'licencia', 'precio', 'precio_descuento', 'duracion_dias_alquiler'),
         }),
         ('Información de Cuenta', {
-            'fields': ('account_name', 'account_password', 'account_stock'),
-            'description': 'Datos de la cuenta asociada a este GameDetail.',
+            'fields': ('cuentas_disponibles',),
+            'description': 'Todas las cuentas con stock disponible para este producto y licencia.',
         }),
         ('Cuotas y reserva', {
             'fields': ('cuotas_activas', 'num_cuotas', 'valor_cuota', 'cuota_inicial',
