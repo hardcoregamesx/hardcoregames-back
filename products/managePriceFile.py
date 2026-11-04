@@ -27,6 +27,52 @@ def last_data_row(sheet, col=1, max_gap=50):
     return last
 
 
+def _norm_header(value):
+    """'Código', 'CODIGO', ' codigo ' -> 'codigo' (sin tildes, minusculas, sin espacios/_)."""
+    import unicodedata
+    text = unicodedata.normalize("NFD", str(value or ""))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return text.strip().lower().replace(" ", "").replace("_", "")
+
+
+def find_column(sheet, *names):
+    """Numero de columna (1-based) cuyo encabezado de la fila 1 coincide con
+    alguno de `names`, o None. Se busca por nombre para poder agregar columnas
+    sin romper los Excel viejos, que tienen las posiciones fijas de siempre."""
+    wanted = {_norm_header(n) for n in names}
+    for col in range(1, (sheet.max_column or 0) + 1):
+        if _norm_header(sheet.cell(row=1, column=col).value) in wanted:
+            return col
+    return None
+
+
+def validate_xbox_sheet_products(sheet):
+    """Falla ANTES de escribir nada si algun producto de la hoja Xbox no tiene
+    consola asignada. En esa hoja entran tambien Nintendo, multiplataforma y
+    otras; la consola sale del producto (Products.consola). Sin consola el
+    codigo antes asumia "xbox" en silencio y dejaba inventario de Nintendo
+    como Xbox (pasó con Zelda Ocarina, id 260). Los productos de suscripcion
+    (type_id_id=3) quedan fuera: siempre van con consola xbox a proposito."""
+    sin_consola = {}
+    for i in range(2, last_data_row(sheet) + 1):
+        account = sheet.cell(row=i, column=1).value
+        id_product = sheet.cell(row=i, column=3).value
+        if not account or not id_product:
+            continue
+        product = Products.objects.filter(id_product=id_product).first()
+        if not product or product.type_id_id == 3:
+            continue  # inexistente: lo reporta el proceso normal
+        if not product.consola.exists():
+            sin_consola[id_product] = product.title
+    if sin_consola:
+        detalle = "; ".join("%s (%s)" % (pid, str(t)[:40]) for pid, t in sin_consola.items())
+        raise forms.ValidationError(
+            "No se subio nada. Estos productos de la hoja cuentas_xbox no tienen consola "
+            "asignada, asi que no se sabe si son Xbox, Nintendo, PC, etc.: %s. "
+            "Asignales la consola en el admin (Productos > Consola) y vuelve a subir." % detalle
+        )
+
+
 def get_or_create_account_for_product(email, password, tipo_cuenta, duration_days, id_product):
     """Busca una ProductAccounts reutilizable para este producto puntual.
 
@@ -63,16 +109,19 @@ def get_or_create_account_for_product(email, password, tipo_cuenta, duration_day
 def read_file_ps(sheetPs, id_primaria, id_secundaria):
     id_ps4 = Consoles.objects.filter(descripcion__icontains="playstation 4")
     id_ps5 = Consoles.objects.filter(descripcion__icontains="playstation 5")
+    id_code = Licenses.objects.filter(descripcion__icontains="codigo")
 
     sheet = sheetPs
+    # Columna opcional CODIGO (se busca por encabezado, en cualquier posicion).
+    code_col = find_column(sheet, "codigo")
     m_row = last_data_row(sheet)
     batch_size = 6
 
     for start in range(2, m_row + 1, batch_size):
         end = min(start + batch_size, m_row + 1)
-        process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundaria)
+        process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundaria, id_code, code_col)
 
-def process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundaria):
+def process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundaria, id_code=None, code_col=None):
     for i in range(start, end):
         account = sheet.cell(row=i, column=1).value
         password = sheet.cell(row=i, column=2).value
@@ -105,6 +154,21 @@ def process_batch_ps(sheet, start, end, id_ps4, id_ps5, id_primaria, id_secundar
                 console = id_ps4 if "ps4" in key else id_ps5
                 tipo = id_primaria if "1" in key else id_secundaria
                 save_or_update_game_detail(id_product, console, tipo, duration_days, account_for_producto)
+
+        # CODIGO: una sola columna. El codigo sirve en las consolas PlayStation
+        # del producto (PS4 y/o PS5 segun Products.consola); si el producto no
+        # declara ninguna de las dos, se guarda en ambas.
+        if code_col and id_code is not None and check_sheet_price(str(sheet.cell(row=i, column=code_col).value).strip()):
+            ps_consoles = [
+                c for c in product_for_create.consola.all()
+                if "playstation 4" in (c.descripcion or "").lower() or "playstation 5" in (c.descripcion or "").lower()
+            ]
+            if not ps_consoles:
+                ps_consoles = list(id_ps4) + list(id_ps5)
+            for consola in ps_consoles:
+                save_or_update_game_detail(
+                    id_product, Consoles.objects.filter(pk=consola.pk), id_code, duration_days, account_for_producto
+                )
 
 def read_file_xbx(sheetPs, id_primaria, id_secundaria):
     id_xbox = Consoles.objects.filter(descripcion__exact="xbox")
@@ -171,10 +235,15 @@ def process_batch_xbx(sheet, start, end, id_xbox, id_code, id_pc, licence_pc, id
         # FastAPI. No tocar ese caso hasta confirmarlo.
         product_consoles = list(product_for_create.consola.all())
         es_familia_xbox = any("xbox" in (c.descripcion or "").lower() for c in product_consoles)
-        if product_for_create.type_id_id == 3 or es_familia_xbox or not product_consoles:
+        if product_for_create.type_id_id == 3 or es_familia_xbox:
             consoles_for_shared_licences = list(id_xbox)
-        else:
+        elif product_consoles:
             consoles_for_shared_licences = product_consoles
+        else:
+            # validate_xbox_sheet_products ya lo frena antes de escribir; esto
+            # solo protege si se llama a este lector por otra via.
+            raise forms.ValidationError(
+                f"El producto {id_product} no tiene consola asignada; no se sabe en que consola guardarlo")
 
         for key, license_type in [
             ("xbox_1", id_primaria),
@@ -226,6 +295,7 @@ class ManegePricesFile:
             id_primaria = Licenses.objects.filter(descripcion__icontains="primaria")
             id_secundaria = Licenses.objects.filter(descripcion__icontains="secundaria")
 
+            validate_xbox_sheet_products(sheet_xbox)
             read_file_ps(sheet_ps, id_primaria, id_secundaria)
             read_file_xbx(sheet_xbox, id_primaria, id_secundaria)
 
