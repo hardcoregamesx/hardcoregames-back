@@ -373,43 +373,48 @@ class GameDetailAdmin(admin.ModelAdmin):
     def account_stock(self, obj):
         return obj.stock
 
-    @admin.display(description='Cuentas con stock disponible')
+    @admin.display(description='')
     def cuentas_disponibles(self, obj):
-        """Todas las cuentas con stock > 0 del mismo grupo que edita este
-        formulario (producto + licencia + duración, igual que save_model)."""
+        """Todas las cuentas con stock > 0 de este producto (todas las
+        licencias y consolas). La fila que se edita va resaltada."""
         if not obj or not obj.pk or not obj.producto_id:
             return '—'
-        filas = (
+        filas = list(
             GameDetail.objects.filter(
-                producto_id=obj.producto_id,
-                licencia_id=obj.licencia_id,
-                duracion_dias_alquiler=obj.duracion_dias_alquiler,
-                stock__gt=0,
-                cuenta__isnull=False,
+                producto_id=obj.producto_id, stock__gt=0, cuenta__isnull=False,
             )
-            .select_related('cuenta', 'cuenta__tipo_cuenta', 'consola')
-            .order_by('cuenta__cuenta', 'id_game_detail')
+            .select_related('cuenta', 'cuenta__tipo_cuenta', 'consola', 'licencia')
+            .order_by('licencia_id', 'consola_id', 'cuenta__cuenta', 'id_game_detail')
         )
-        filas = list(filas)
         if not filas:
-            return 'No hay cuentas con stock disponible para esta combinación.'
+            return 'No hay cuentas con stock disponible para este producto.'
+        th = 'style="text-align:left;padding:6px 10px;border-bottom:2px solid #ccc;white-space:nowrap;"'
+        td = 'style="padding:6px 10px;border-bottom:1px solid #eee;white-space:nowrap;"'
         filas_html = []
         for gd in filas:
             c = gd.cuenta
             url = reverse('admin:products_productaccounts_change', args=[c.id_product_accounts])
+            bg = 'background:#fff8d6;' if gd.pk == obj.pk else ''
             filas_html.append(format_html(
-                '<tr><td><a href="{}" target="_blank">{}</a></td><td>{}</td><td>{}</td>'
-                '<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><b>{}</b></td></tr>',
-                url, c.cuenta, c.password or '—', c.tipo_cuenta,
-                'Sí' if c.activa else 'No', c.dias_duracion if c.dias_duracion is not None else '—',
-                c.codigo_seguridad or '—', gd.consola or '—', gd.stock,
+                '<tr style="{}"><td {}>{}</td><td {}>{}</td><td {}><a href="{}" target="_blank">{}</a></td>'
+                '<td {}>{}</td><td {}>{}</td><td {}>{}</td><td {}>{}</td><td {}>{}</td><td {}><b>{}</b></td></tr>',
+                bg, mark_safe(td), gd.licencia or '—', mark_safe(td), gd.consola or '—',
+                mark_safe(td), url, c.cuenta,
+                mark_safe(td), c.password or '—', mark_safe(td), c.tipo_cuenta,
+                mark_safe(td), 'Sí' if c.activa else 'No',
+                mark_safe(td), c.dias_duracion if c.dias_duracion is not None else '—',
+                mark_safe(td), c.codigo_seguridad or '—', mark_safe(td), gd.stock,
             ))
         total = sum(gd.stock for gd in filas)
+        heads = ''.join(
+            f'<th {th}>{h}</th>' for h in
+            ('Licencia', 'Consola', 'Cuenta', 'Contraseña', 'Tipo', 'Activa', 'Días', 'Código seguridad', 'Stock')
+        )
         return format_html(
-            '<table><thead><tr><th>Cuenta</th><th>Contraseña</th><th>Tipo</th><th>Activa</th>'
-            '<th>Días</th><th>Código seguridad</th><th>Consola</th><th>Stock</th></tr></thead>'
-            '<tbody>{}</tbody></table><p><b>{} cuenta(s) · stock total: {}</b></p>',
-            mark_safe(''.join(filas_html)), len(filas), total,
+            '<div style="overflow-x:auto;width:100%;"><table style="border-collapse:collapse;width:100%;">'
+            '<thead><tr>{}</tr></thead><tbody>{}</tbody></table></div>'
+            '<p style="margin-top:8px;"><b>{} cuenta(s) · stock total: {}</b> (la fila que editas va resaltada)</p>',
+            mark_safe(heads), mark_safe(''.join(filas_html)), len(filas), total,
         )
 
     product.short_description = 'Producto'
