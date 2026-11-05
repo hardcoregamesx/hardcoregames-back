@@ -1595,7 +1595,12 @@ def _calculate_cart_amount(parsed_transaction, allow_plans=True):
             pago_hoy = gd.cuota_inicial if gd.cuota_inicial else gd.valor_cuota
         elif modo_pago == 'reserva':
             fecha_lanzamiento = gd.producto.fecha_lanzamiento if gd.producto else None
-            if not gd.reserva_activa or not fecha_lanzamiento or fecha_lanzamiento <= today:
+            # Los productos "sobre pedido" (p. ej. el ancla de la landing /zelda)
+            # se reservan aunque su fecha de lanzamiento ya llegó o pasó: el
+            # lanzamiento no los cierra, solo `reserva_activa` decide.
+            sobre_pedido = bool(gd.producto and gd.producto.sobre_pedido)
+            fecha_ok = sobre_pedido or (fecha_lanzamiento and fecha_lanzamiento > today)
+            if not gd.reserva_activa or not fecha_ok:
                 return None, None, None, JsonResponse(
                     {"error": f"El producto {combo_id} no admite reserva"}, status=400
                 ), None, None
