@@ -2586,6 +2586,10 @@ def _notify_ventas_module(transaction):
 
 
 def process_transferencia_event(data):
+    # Preventas (transaction_id "PV-...") se resuelven en su propio modulo.
+    from preventas import services as preventas_services
+    if preventas_services.handle_event(data):
+        return
     transaction_id = data.get("transaction_id")
     confidence = data.get("confidence")
 
