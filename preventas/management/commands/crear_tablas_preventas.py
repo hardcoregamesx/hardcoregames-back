@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS preventas_preventa (
     reserva_unit INTEGER NOT NULL,
     breb_key VARCHAR(60) NOT NULL DEFAULT '',
     envio_nacional_est INTEGER NOT NULL DEFAULT 20000,
+    permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE,
+    abono_minimo INTEGER NOT NULL DEFAULT 10000,
     pre_min INTEGER NOT NULL DEFAULT 0,
     pre_max INTEGER NOT NULL DEFAULT 0,
     pre_final INTEGER,
@@ -67,6 +69,9 @@ CREATE TABLE IF NOT EXISTS preventas_pago (
     deadline_at VARCHAR(40) NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Instalaciones anteriores a los abonos libres (idempotente):
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS abono_minimo INTEGER NOT NULL DEFAULT 10000;
 """
 
 

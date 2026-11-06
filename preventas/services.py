@@ -80,20 +80,48 @@ def _take_stock(reserva):
 #  Saldo                                                                   #
 # ----------------------------------------------------------------------- #
 
+def abonado_total(reserva):
+    """Reserva pagada + abonos/saldo confirmados. El envío NO entra."""
+    total = reserva.reserva_total if reserva.paid_at else 0
+    for pago in reserva.pagos.filter(status='approved', tipo__in=('ABONO', 'SALDO')):
+        total += pago.monto
+    return total
+
+
 def saldo_info(reserva):
-    """Saldo pendiente de una reserva. El envío NO entra: se paga al recibir."""
+    """Saldo pendiente de una reserva. El envío NO entra: se paga al recibir.
+
+    Tope de abonos: el precio final × unidades si ya se fijó; si no, el
+    precio máximo estimado de la fase de la reserva × unidades."""
     p = reserva.preventa
     info = fase_info(p, reserva.fase)
     unidades = reserva.unidades
-    abonado = reserva.reserva_total if reserva.paid_at else 0
+    abonado = abonado_total(reserva)
+    extra = {'abonado': abonado, 'permite_abonos': bool(p.permitir_abonos), 'abono_minimo': p.abono_minimo}
     if info['final'] is not None:
-        saldo = max(info['final'] * unidades - abonado, 0)
-        return {'definitivo': True, 'precio_unit': info['final'], 'saldo': saldo, 'saldo_min': saldo, 'saldo_max': saldo}
+        total = info['final'] * unidades
+        saldo = max(total - abonado, 0)
+        return {**extra, 'definitivo': True, 'precio_unit': info['final'], 'saldo': saldo,
+                'saldo_min': saldo, 'saldo_max': saldo, 'tope': total, 'max_abono': saldo}
+    tope = info['max'] * unidades
     return {
-        'definitivo': False, 'precio_unit': None, 'saldo': None,
+        **extra, 'definitivo': False, 'precio_unit': None, 'saldo': None,
         'saldo_min': max(info['min'] * unidades - abonado, 0),
-        'saldo_max': max(info['max'] * unidades - abonado, 0),
+        'saldo_max': max(tope - abonado, 0), 'tope': tope, 'max_abono': max(tope - abonado, 0),
     }
+
+
+def sync_estado(reserva):
+    """Si ya se fijó el precio final y lo abonado lo cubre, pasa a PAGADA.
+    Se llama al confirmarse un pago y al consultar (el admin pudo fijar el
+    precio después de que el cliente abonara)."""
+    if reserva.estado != ESTADO_RESERVADA:
+        return
+    s = saldo_info(reserva)
+    if s['definitivo'] and s['saldo'] <= 0:
+        reserva.estado = ESTADO_PAGADA
+        reserva.saldo_paid_at = timezone.now()
+        reserva.save(update_fields=['estado', 'saldo_paid_at'])
 
 
 # ----------------------------------------------------------------------- #
@@ -222,13 +250,50 @@ def crear_pago_saldo(reserva, nombre_pagador):
         raise ReservaError('El precio final aún no está definido', 409)
     if s['saldo'] <= 0:
         raise ReservaError('No hay saldo pendiente', 409)
-    for pago in reserva.pagos.filter(tipo='SALDO', status='pendiente'):
-        if pago.monto == s['saldo']:
+    reutilizable = _cancelar_pendientes(reserva, tipo='SALDO', monto=s['saldo'])
+    if reutilizable:
+        return reutilizable
+    pago = _nuevo_pago(reserva, 'SALDO', s['saldo'], nombre_pagador or reserva.nombre)
+    if pago is None:
+        raise ReservaError('No se pudo iniciar la verificación del pago, intenta de nuevo', 502)
+    return pago
+
+
+def _cancelar_pendientes(reserva, tipo=None, monto=None):
+    """Cancela los cobros pendientes de la reserva (solo uno puede estar
+    abierto a la vez). Si hay uno idéntico (mismo tipo y monto) lo devuelve
+    sin cancelarlo, para reutilizarlo."""
+    for pago in reserva.pagos.filter(status='pendiente').exclude(tipo='RESERVA'):
+        if tipo and pago.tipo == tipo and pago.monto == monto:
             return pago
         pago.status = 'cancelada'
         pago.save(update_fields=['status'])
         _vozpay('POST', f'/api/expectations/{pago.transaction_id}/cancel', {})
-    pago = _nuevo_pago(reserva, 'SALDO', s['saldo'], nombre_pagador or reserva.nombre)
+    return None
+
+
+def crear_pago_abono(reserva, monto, nombre_pagador):
+    """Abono libre: mínimo `abono_minimo` y hasta el tope de la fase."""
+    p = reserva.preventa
+    if not p.permitir_abonos:
+        raise ReservaError('Esta preventa no permite abonos', 409)
+    if reserva.estado != ESTADO_RESERVADA:
+        raise ReservaError('Esta reserva no puede recibir abonos', 409)
+    s = saldo_info(reserva)
+    if s['max_abono'] <= 0:
+        raise ReservaError('Ya alcanzaste el tope de abonos', 409)
+    try:
+        monto = int(monto)
+    except (TypeError, ValueError):
+        raise ReservaError('Escribe un valor válido')
+    if monto > s['max_abono']:
+        raise ReservaError(f"Puedes abonar máximo ${s['max_abono']:,}".replace(',', '.'))
+    if monto < p.abono_minimo and monto != s['max_abono']:
+        raise ReservaError(f'El abono mínimo es ${p.abono_minimo:,}'.replace(',', '.'))
+    reutilizable = _cancelar_pendientes(reserva, tipo='ABONO', monto=monto)
+    if reutilizable:
+        return reutilizable
+    pago = _nuevo_pago(reserva, 'ABONO', monto, nombre_pagador or reserva.nombre)
     if pago is None:
         raise ReservaError('No se pudo iniciar la verificación del pago, intenta de nuevo', 502)
     return pago
@@ -282,11 +347,9 @@ def _aprobar(pago):
             r.paid_at = ahora
             r.save(update_fields=['estado', 'paid_at'])
             _take_stock(r)
-    elif pago.tipo == 'SALDO':
-        if r.estado == ESTADO_RESERVADA:
-            r.estado = ESTADO_PAGADA
-            r.saldo_paid_at = ahora
-            r.save(update_fields=['estado', 'saldo_paid_at'])
+    elif pago.tipo in ('SALDO', 'ABONO'):
+        # El pago ya quedó 'approved' arriba, así que abonado_total() lo cuenta.
+        sync_estado(r)
 
 
 def _vencer(pago):

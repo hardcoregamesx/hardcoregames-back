@@ -25,6 +25,7 @@ def _preventa_public(p):
     return {
         'slug': p.slug, 'title': p.title, 'description': p.description, 'imageUrl': p.image_url,
         'reservaUnit': p.reserva_unit, 'envioNacionalEst': p.envio_nacional_est,
+        'permitirAbonos': p.permitir_abonos, 'abonoMinimo': p.abono_minimo,
         'fase': info['fase'], 'min': info['min'], 'max': info['max'], 'final': info['final'],
         'agotado': info['agotado'], 'disponibles': info['disponibles'],
         'switchAt': p.switch_at.isoformat() if p.switch_at else None,
@@ -154,7 +155,14 @@ def _reserva_public(r):
             'definitivo': s['definitivo'], 'precioUnit': s['precio_unit'], 'monto': s['saldo'],
             'min': s['saldo_min'], 'max': s['saldo_max'],
             'puedePagar': r.estado == ESTADO_RESERVADA and s['definitivo'] and (s['saldo'] or 0) > 0,
+            'abonado': s['abonado'], 'tope': s['tope'],
+            'permiteAbonos': s['permite_abonos'] and r.estado == ESTADO_RESERVADA and s['max_abono'] > 0,
+            'abonoMinimo': s['abono_minimo'], 'maxAbono': s['max_abono'],
         },
+        'pagos': [
+            {'transactionId': pg.transaction_id, 'tipo': pg.tipo, 'monto': pg.monto, 'status': pg.status}
+            for pg in r.pagos.order_by('-created_at')[:15]
+        ],
         'guia': r.guia, 'despachadoAt': r.despachado_at.isoformat() if r.despachado_at else None,
         'expiresAt': r.expires_at.isoformat() if r.expires_at else None,
         'pagoPendiente': services.pago_payload(pago_pend) if pago_pend else None,
@@ -169,7 +177,23 @@ def consulta(request):
     r = _reserva_autorizada(_body(request))
     if not r:
         return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
+    services.sync_estado(r)  # el admin pudo fijar el precio final después de los abonos
     return JsonResponse({'reserva': _reserva_public(r)})
+
+
+@csrf_exempt
+def pagar_abono(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = _body(request)
+    r = _reserva_autorizada(data)
+    if not r:
+        return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
+    try:
+        pago = services.crear_pago_abono(r, data.get('monto'), str(data.get('nombrePagador') or '').strip())
+    except services.ReservaError as e:
+        return JsonResponse({'error': e.message}, status=e.status)
+    return JsonResponse({'pago': services.pago_payload(pago)})
 
 
 @csrf_exempt

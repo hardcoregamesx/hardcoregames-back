@@ -61,6 +61,12 @@ class Preventa(models.Model):
         default=20000, verbose_name='Envío a su ciudad (estimado, COP)',
         help_text='Solo informativo: el envío lo paga el cliente al recibir.',
     )
+    permitir_abonos = models.BooleanField(
+        default=False, verbose_name='Permitir abonos libres',
+        help_text='El cliente puede ir abonando el monto que quiera (mínimo abajo) hasta el tope de la fase actual '
+                  '(o el precio final, si ya lo fijaste).',
+    )
+    abono_minimo = models.IntegerField(default=10000, verbose_name='Abono mínimo (COP)')
 
     pre_min = models.IntegerField(default=0, verbose_name='Preventa: precio mínimo estimado')
     pre_max = models.IntegerField(default=0, verbose_name='Preventa: precio máximo estimado')

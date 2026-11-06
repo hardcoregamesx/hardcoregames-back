@@ -32,6 +32,7 @@ class PreventaAdmin(admin.ModelAdmin):
     fieldsets = (
         ('General', {'fields': ('title', 'slug', 'description', 'image_url', 'active', 'fase_actual_txt')}),
         ('Reserva y pagos', {'fields': ('reserva_unit', 'breb_key', 'envio_nacional_est')}),
+        ('Abonos libres', {'fields': ('permitir_abonos', 'abono_minimo')}),
         ('Fase 1 — Preventa', {'fields': ('pre_min', 'pre_max', 'pre_final')}),
         ('Cambio automático', {'fields': ('switch_at',)}),
         ('Fase 2 — Preventa tardía', {'fields': ('tardia_min', 'tardia_max', 'tardia_final', 'tardia_disponibles')}),
@@ -72,13 +73,13 @@ def exportar_csv(modeladmin, request, queryset):
     resp.write('﻿')
     w = csv.writer(resp)
     w.writerow(['Código', 'Preventa', 'Fase', 'Unidades', 'Estado', 'Nombre', 'WhatsApp', 'Cédula', 'Dirección',
-                'Ciudad', 'Envío', 'Ciudad intermedia', 'Reserva pagada', 'Saldo estimado/pendiente',
+                'Ciudad', 'Envío', 'Ciudad intermedia', 'Total abonado', 'Saldo estimado/pendiente',
                 'Guía / domiciliario', 'Fecha despacho', 'Cómo nos conoció', 'Fecha reserva'])
     for r in queryset.select_related('preventa'):
         s = services.saldo_info(r)
         saldo = s['saldo'] if s['definitivo'] else f"{s['saldo_min']}–{s['saldo_max']}"
         w.writerow([r.codigo, r.preventa.title, r.fase, r.unidades, r.estado, r.nombre, r.whatsapp, r.cedula,
-                    r.direccion, r.ciudad, r.envio_tipo, r.ciudad_intermedia, r.reserva_total if r.paid_at else 0,
+                    r.direccion, r.ciudad, r.envio_tipo, r.ciudad_intermedia, s['abonado'],
                     saldo, r.guia, r.despachado_at.strftime('%Y-%m-%d %H:%M') if r.despachado_at else '',
                     r.fuente, r.created_at.strftime('%Y-%m-%d %H:%M')])
     return resp
@@ -125,8 +126,8 @@ class ReservaAdmin(admin.ModelAdmin):
     def saldo_txt(self, obj):
         s = services.saldo_info(obj)
         if s['definitivo']:
-            return f"${s['saldo']:,} (precio final ${s['precio_unit']:,} c/u)"
-        return f"${s['saldo_min']:,} – ${s['saldo_max']:,} (estimado, sin precio final)"
+            return f"${s['saldo']:,} (precio final ${s['precio_unit']:,} c/u) · abonado ${s['abonado']:,}"
+        return f"${s['saldo_min']:,} – ${s['saldo_max']:,} (estimado, sin precio final) · abonado ${s['abonado']:,}"
     saldo_txt.short_description = 'Saldo pendiente'
 
     def save_model(self, request, obj, form, change):
