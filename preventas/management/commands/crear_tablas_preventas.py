@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS preventas_ciudad_intermedia (
 CREATE TABLE IF NOT EXISTS preventas_reserva (
     id BIGSERIAL PRIMARY KEY,
     codigo VARCHAR(12) NOT NULL UNIQUE,
+    user_id BIGINT,
     preventa_id BIGINT NOT NULL REFERENCES preventas_preventa(id),
     fase VARCHAR(10) NOT NULL,
     unidades INTEGER NOT NULL,
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS preventas_pago (
 -- Instalaciones anteriores a los abonos libres (idempotente):
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS abono_minimo INTEGER NOT NULL DEFAULT 10000;
+ALTER TABLE preventas_reserva ADD COLUMN IF NOT EXISTS user_id BIGINT;
+CREATE INDEX IF NOT EXISTS preventas_reserva_user_idx ON preventas_reserva (user_id);
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS enlace_corto VARCHAR(60) NOT NULL DEFAULT '';
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_desde DATE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_hasta DATE;

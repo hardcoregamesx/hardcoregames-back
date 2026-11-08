@@ -136,6 +136,7 @@ def reservar(request):
     datos, err = _validar(data, p)
     if err:
         return JsonResponse({'error': 'Revisa los datos', 'fields': err}, status=400)
+    datos['user_id'] = _jwt_user(request)  # None si reserva como invitado
     try:
         reserva, pago = services.crear_reserva(p, datos)
     except services.ReservaError as e:
@@ -146,13 +147,35 @@ def reservar(request):
     }, status=201)
 
 
-def _reserva_autorizada(data):
+def _jwt_user(request):
+    """ID de la cuenta si el request trae un Bearer token válido (el mismo que
+    usa el resto del sitio); None si es invitado o el token no sirve."""
+    from products import views as products_views  # import tardío: evita ciclos
+    uid, _ = products_views._get_verified_jwt_user(request)
+    try:
+        return int(uid) if uid is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _reserva_autorizada(request, data):
+    """Una reserva se abre con (código + cédula) o, si el cliente tiene sesión, con
+    el código de una reserva suya. Abrirla con código + cédula estando logueado la
+    vincula a su cuenta (así aparece en "Mis reservas")."""
     codigo = str(data.get('codigo') or '').strip().upper()
-    cedula = services.solo_digitos(data.get('cedula'))
-    if not codigo or not cedula:
+    if not codigo:
         return None
     r = Reserva.objects.select_related('preventa').filter(codigo=codigo).first()
-    if r and r.cedula == cedula:
+    if not r:
+        return None
+    uid = _jwt_user(request)
+    cedula = services.solo_digitos(data.get('cedula'))
+    if cedula and r.cedula == cedula:
+        if uid and r.user_id is None:
+            r.user_id = uid
+            r.save(update_fields=['user_id'])
+        return r
+    if uid and r.user_id == uid:
         return r
     return None
 
@@ -195,11 +218,36 @@ def consulta(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     services.expirar_vencidas()
-    r = _reserva_autorizada(_body(request))
+    r = _reserva_autorizada(request, _body(request))
     if not r:
         return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
     services.sync_estado(r)  # el admin pudo fijar el precio final después de los abonos
     return JsonResponse({'reserva': _reserva_public(r)})
+
+
+def mi_perfil(request):
+    """Datos de envío de la última reserva de la cuenta (para no volver a llenar el formulario)."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    uid = _jwt_user(request)
+    if uid is None:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    return JsonResponse({'perfil': services.perfil_de_usuario(uid)})
+
+
+def mis_reservas(request):
+    """Reservas de la cuenta con sesión, sin pedir código ni cédula."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    uid = _jwt_user(request)
+    if uid is None:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    services.expirar_vencidas()
+    out = []
+    for r in Reserva.objects.select_related('preventa').filter(user_id=uid).order_by('-created_at')[:30]:
+        services.sync_estado(r)
+        out.append(_reserva_public(r))
+    return JsonResponse({'reservas': out})
 
 
 @csrf_exempt
@@ -207,7 +255,7 @@ def pagar_abono(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     data = _body(request)
-    r = _reserva_autorizada(data)
+    r = _reserva_autorizada(request, data)
     if not r:
         return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
     try:
@@ -222,7 +270,7 @@ def pagar_saldo(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     data = _body(request)
-    r = _reserva_autorizada(data)
+    r = _reserva_autorizada(request, data)
     if not r:
         return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
     try:
@@ -238,7 +286,7 @@ def ya_transferi(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     data = _body(request)
-    r = _reserva_autorizada(data)
+    r = _reserva_autorizada(request, data)
     if not r:
         return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
     pago = Pago.objects.filter(reserva=r, transaction_id=str(data.get('transactionId') or '')).first()

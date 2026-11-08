@@ -227,6 +227,7 @@ def crear_reserva(preventa, datos):
             nombre=datos['nombre'], whatsapp=datos['whatsapp'], direccion=datos['direccion'],
             ciudad=datos['ciudad'], cedula=datos['cedula'], fuente=datos['fuente'],
             envio_tipo=datos['envio_tipo'], ciudad_intermedia=datos['ciudad_intermedia'],
+            user_id=datos.get('user_id'),
             reserva_total=p.reserva_unit * unidades, estado=ESTADO_PENDIENTE,
             expires_at=timezone.now() + timedelta(minutes=RESERVA_MINUTOS),
         )
@@ -389,6 +390,17 @@ def cerrar_reserva(reserva_id, nuevo_estado):
 # ----------------------------------------------------------------------- #
 #  Validación y presentación                                               #
 # ----------------------------------------------------------------------- #
+
+def perfil_de_usuario(user_id):
+    """Datos de envío de la última reserva de la cuenta, para prefilar el formulario."""
+    r = Reserva.objects.filter(user_id=user_id).order_by('-created_at').first()
+    if not r:
+        return None
+    return {
+        'nombre': r.nombre, 'whatsapp': r.whatsapp, 'direccion': r.direccion, 'ciudad': r.ciudad,
+        'cedula': r.cedula, 'fuente': r.fuente,
+    }
+
 
 def solo_digitos(valor):
     return re.sub(r'\D', '', str(valor or ''))

@@ -110,13 +110,13 @@ class ReservaAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     actions = [exportar_csv, cancelar, reembolsada]
     inlines = [PagoInline]
-    readonly_fields = ('codigo', 'preventa', 'fase', 'unidades', 'nombre', 'whatsapp', 'direccion', 'ciudad',
+    readonly_fields = ('codigo', 'user_id', 'preventa', 'fase', 'unidades', 'nombre', 'whatsapp', 'direccion', 'ciudad',
                        'cedula', 'fuente', 'envio_tipo', 'ciudad_intermedia', 'reserva_total', 'saldo_txt',
                        'despachado_at', 'expires_at', 'paid_at', 'saldo_paid_at', 'created_at')
     fieldsets = (
         ('Reserva', {'fields': ('codigo', 'preventa', 'fase', 'unidades', 'estado', 'reserva_total', 'saldo_txt',
                                 'paid_at', 'saldo_paid_at', 'created_at')}),
-        ('Cliente', {'fields': ('nombre', 'whatsapp', 'cedula', 'fuente')}),
+        ('Cliente', {'fields': ('nombre', 'whatsapp', 'cedula', 'fuente', 'user_id')}),
         ('Envío', {'fields': ('direccion', 'ciudad', 'envio_tipo', 'ciudad_intermedia')}),
         ('Despacho', {'fields': ('guia', 'despachado_at', 'notas'),
                       'description': 'Al llenar la guía, la fecha de despacho se guarda sola y el estado pasa a Despachada.'}),

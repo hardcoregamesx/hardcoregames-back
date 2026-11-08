@@ -184,6 +184,10 @@ class CiudadIntermedia(models.Model):
 
 class Reserva(models.Model):
     codigo = models.CharField(max_length=12, unique=True)
+    user_id = models.BigIntegerField(
+        null=True, blank=True, verbose_name='ID de cuenta',
+        help_text='Cuenta del sitio con la que se reservó (vacío = reservó como invitado).',
+    )
     preventa = models.ForeignKey(Preventa, on_delete=models.PROTECT, db_column='preventa_id', related_name='reservas')
     fase = models.CharField(max_length=10, choices=FASE_CHOICES)
     unidades = models.IntegerField()
