@@ -61,6 +61,11 @@ FUENTE_CHOICES = [
 class Preventa(models.Model):
     slug = models.SlugField(max_length=80, unique=True, verbose_name='Slug (URL)',
                             help_text='Ej. metroid-prime-4. La página queda en /preventas/<slug>.')
+    enlace_corto = models.SlugField(
+        max_length=60, blank=True, default='', verbose_name='Enlace corto',
+        help_text='Opcional. Una sola palabra para compartir: con "metroid", la dirección '
+                  'www.hardcoregames.co/metroid abre esta preventa. Sin barras ni espacios.',
+    )
     title = models.CharField(max_length=150, verbose_name='Título')
     description = models.TextField(blank=True, default='', verbose_name='Descripción')
     image_url = models.CharField(max_length=500, null=True, blank=True, verbose_name='Imagen (URL)')
@@ -130,6 +135,14 @@ class Preventa(models.Model):
         from django.core.exceptions import ValidationError
         if self.entrega_desde and self.entrega_hasta and self.entrega_hasta < self.entrega_desde:
             raise ValidationError({'entrega_hasta': 'Debe ser igual o posterior a "Entregas desde".'})
+        corto = (self.enlace_corto or '').strip().lower()
+        if corto:
+            if corto in RUTAS_UN_SEGMENTO:
+                raise ValidationError({'enlace_corto': f'"{corto}" ya es una página del sitio; elige otra palabra.'})
+            otra = Preventa.objects.filter(enlace_corto=corto).exclude(pk=self.pk).first()
+            if otra:
+                raise ValidationError({'enlace_corto': f'"{corto}" ya lo usa la preventa "{otra.title}".'})
+        self.enlace_corto = corto
         enlace = (self.enlace_externo or '').strip()
         if enlace and not (enlace.startswith('/') or enlace.startswith('http')):
             raise ValidationError({'enlace_externo': 'Debe empezar por / (ruta del sitio) o http(s)://.'})

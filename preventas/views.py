@@ -50,6 +50,18 @@ def preventas_list(request):
     return JsonResponse({'preventas': items})
 
 
+def preventa_alias(request):
+    """Resuelve un enlace corto (hardcoregames.co/<alias>) al destino de la preventa.
+    Lo consulta el catch-all de frontend-v2 antes de tratar la ruta como cupón."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    alias = request.GET.get('c', '').strip().lower()
+    p = Preventa.objects.filter(enlace_corto=alias, active=True).first() if alias else None
+    if not p:
+        return JsonResponse({'error': 'Sin alias'}, status=404)
+    return JsonResponse({'destino': p.enlace_externo or f'/preventas/{p.slug}'})
+
+
 def preventa_detail(request):
     if request.method != 'GET':
         return JsonResponse({'error': 'Method not allowed'}, status=405)

@@ -30,7 +30,7 @@ class PreventaAdmin(admin.ModelAdmin):
     prepopulated_fields = {'slug': ('title',)}
     readonly_fields = ('fase_actual_txt', 'created_at')
     fieldsets = (
-        ('General', {'fields': ('title', 'slug', 'description', 'image_url', 'active', 'fase_actual_txt')}),
+        ('General', {'fields': ('title', 'slug', 'enlace_corto', 'description', 'image_url', 'active', 'fase_actual_txt')}),
         ('Reserva y pagos', {'fields': ('reserva_unit', 'breb_key', 'envio_nacional_est')}),
         ('Abonos libres', {'fields': ('permitir_abonos', 'abono_minimo')}),
         ('Fechas de entrega (juegos físicos)', {'fields': ('entrega_desde', 'entrega_hasta')}),

@@ -5,6 +5,7 @@ SQL = """
 CREATE TABLE IF NOT EXISTS preventas_preventa (
     id BIGSERIAL PRIMARY KEY,
     slug VARCHAR(80) NOT NULL UNIQUE,
+    enlace_corto VARCHAR(60) NOT NULL DEFAULT '',
     title VARCHAR(150) NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     image_url VARCHAR(500),
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS preventas_pago (
 -- Instalaciones anteriores a los abonos libres (idempotente):
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS abono_minimo INTEGER NOT NULL DEFAULT 10000;
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS enlace_corto VARCHAR(60) NOT NULL DEFAULT '';
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_desde DATE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_hasta DATE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS enlace_externo VARCHAR(300) NOT NULL DEFAULT '';
