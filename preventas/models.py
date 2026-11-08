@@ -35,6 +35,18 @@ ENVIO_CHOICES = [
     (ENVIO_INTERMEDIA, 'Por ciudad intermedia y luego domicilio'),
 ]
 
+# Rutas de un solo segmento que existen de verdad en www.hardcoregames.co (páginas de frontend-v2
+# más las landings que sirve el nginx legacy). Cualquier otra, ej. /metroid, la toma /[couponCode].
+# Si se agrega una página nueva al sitio, súmala aquí para poder enlazarla.
+RUTAS_UN_SEGMENTO = {
+    'zelda', 'grandtheftautovi', 'fc27', 'fc27ultimate', 'gamepassultimate', 'psplus', 'fisicos', 'rewards',
+    'politica-tratamiento-datos', '2x1-playstation', '3x2-juegos', 'beneficios', 'cart', 'catalogo', 'cheap-games',
+    'checkout', 'como-comprar-juegos-digitales-colombia', 'destacados', 'filters', 'game-pass', 'gamepass12meses',
+    'guarantees', 'help', 'juegos-pc', 'juegos-ps5', 'juegos-xbox', 'liked-games', 'locura-playstation',
+    'locura-xbox', 'most-sold', 'new-releases', 'nintendo-switch', 'points', 'preventas', 'profile', 'purchases',
+    'rifas', 'sobre-pedido', 'suscripciones', 'week-offers',
+}
+
 FUENTE_CHOICES = [
     ('Google', 'Google'),
     ('Facebook', 'Facebook'),
@@ -75,8 +87,10 @@ class Preventa(models.Model):
     entrega_hasta = models.DateField(null=True, blank=True, verbose_name='Entregas hasta')
     enlace_externo = models.CharField(
         max_length=300, blank=True, default='', verbose_name='Enlace externo',
-        help_text='Solo para preventas que se reservan en su propia página (ej. /zelda, /grandtheftautovi). '
-                  'Si lo llenas, la tarjeta en /preventas lleva a ese enlace y no usa el formulario nuevo.',
+        help_text='DÉJALO VACÍO si la preventa usa el formulario de reserva nuevo (como Metroid Ravenous): '
+                  'la tarjeta llevará a /preventas/<slug>. Llénalo SOLO si la preventa se reserva en una página '
+                  'propia que ya existe (ej. /zelda, /grandtheftautovi). Si pones una ruta que no existe, el sitio '
+                  'la interpreta como un código de cupón.',
     )
 
     pre_min = models.IntegerField(default=0, verbose_name='Preventa: precio mínimo estimado')
@@ -116,8 +130,20 @@ class Preventa(models.Model):
         from django.core.exceptions import ValidationError
         if self.entrega_desde and self.entrega_hasta and self.entrega_hasta < self.entrega_desde:
             raise ValidationError({'entrega_hasta': 'Debe ser igual o posterior a "Entregas desde".'})
-        if self.enlace_externo and not (self.enlace_externo.startswith('/') or self.enlace_externo.startswith('http')):
+        enlace = (self.enlace_externo or '').strip()
+        if enlace and not (enlace.startswith('/') or enlace.startswith('http')):
             raise ValidationError({'enlace_externo': 'Debe empezar por / (ruta del sitio) o http(s)://.'})
+        if enlace.startswith('//'):
+            raise ValidationError({'enlace_externo': 'Usa una ruta del sitio (/zelda) o una URL completa (https://…).'})
+        if enlace.startswith('/'):
+            # Una ruta de un solo segmento que no es una página real cae en /[couponCode] y se aplica como cupón.
+            segmentos = [s for s in enlace.split('?')[0].split('#')[0].split('/') if s]
+            if len(segmentos) == 1 and segmentos[0].lower() not in RUTAS_UN_SEGMENTO:
+                raise ValidationError({'enlace_externo': (
+                    f'"/{segmentos[0]}" no es una página del sitio y se aplicaría como cupón. Déjalo vacío si esta '
+                    'preventa usa el formulario nuevo (/preventas/<slug>), o escribe la ruta de una página que exista.'
+                )})
+        self.enlace_externo = enlace
 
     def __str__(self):
         return self.title
