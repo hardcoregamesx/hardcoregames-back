@@ -26,6 +26,9 @@ def _preventa_public(p):
         'slug': p.slug, 'title': p.title, 'description': p.description, 'imageUrl': p.image_url,
         'reservaUnit': p.reserva_unit, 'envioNacionalEst': p.envio_nacional_est,
         'permitirAbonos': p.permitir_abonos, 'abonoMinimo': p.abono_minimo,
+        'entregaDesde': p.entrega_desde.isoformat() if p.entrega_desde else None,
+        'entregaHasta': p.entrega_hasta.isoformat() if p.entrega_hasta else None,
+        'enlaceExterno': p.enlace_externo or None,
         'fase': info['fase'], 'min': info['min'], 'max': info['max'], 'final': info['final'],
         'agotado': info['agotado'], 'disponibles': info['disponibles'],
         'switchAt': p.switch_at.isoformat() if p.switch_at else None,
@@ -116,6 +119,8 @@ def reservar(request):
     p = Preventa.objects.filter(slug=str(data.get('slug') or ''), active=True).first()
     if not p:
         return JsonResponse({'error': 'Preventa no encontrada'}, status=404)
+    if p.enlace_externo:
+        return JsonResponse({'error': 'Esta preventa se reserva en su propia página'}, status=409)
     datos, err = _validar(data, p)
     if err:
         return JsonResponse({'error': 'Revisa los datos', 'fields': err}, status=400)
@@ -146,7 +151,11 @@ def _reserva_public(r):
     pago_pend = r.pagos.filter(status='pendiente').order_by('-created_at').first()
     return {
         'codigo': r.codigo, 'estado': r.estado, 'fase': r.fase, 'unidades': r.unidades,
-        'preventa': {'slug': p.slug, 'title': p.title, 'imageUrl': p.image_url},
+        'preventa': {
+            'slug': p.slug, 'title': p.title, 'imageUrl': p.image_url,
+            'entregaDesde': p.entrega_desde.isoformat() if p.entrega_desde else None,
+            'entregaHasta': p.entrega_hasta.isoformat() if p.entrega_hasta else None,
+        },
         'nombre': r.nombre, 'ciudad': r.ciudad, 'cedula': services.mask_cedula(r.cedula),
         'envioTipo': r.envio_tipo, 'ciudadIntermedia': r.ciudad_intermedia,
         'envioEstimado': p.envio_nacional_est if r.envio_tipo == ENVIO_DIRECTO else None,

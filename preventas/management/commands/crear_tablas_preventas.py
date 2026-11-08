@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS preventas_preventa (
     envio_nacional_est INTEGER NOT NULL DEFAULT 20000,
     permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE,
     abono_minimo INTEGER NOT NULL DEFAULT 10000,
+    entrega_desde DATE,
+    entrega_hasta DATE,
+    enlace_externo VARCHAR(300) NOT NULL DEFAULT '',
     pre_min INTEGER NOT NULL DEFAULT 0,
     pre_max INTEGER NOT NULL DEFAULT 0,
     pre_final INTEGER,
@@ -72,6 +75,9 @@ CREATE TABLE IF NOT EXISTS preventas_pago (
 -- Instalaciones anteriores a los abonos libres (idempotente):
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS permitir_abonos BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS abono_minimo INTEGER NOT NULL DEFAULT 10000;
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_desde DATE;
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS entrega_hasta DATE;
+ALTER TABLE preventas_preventa ADD COLUMN IF NOT EXISTS enlace_externo VARCHAR(300) NOT NULL DEFAULT '';
 """
 
 

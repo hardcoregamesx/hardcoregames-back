@@ -24,7 +24,7 @@ class PagoInline(admin.TabularInline):
 @admin.register(Preventa)
 class PreventaAdmin(admin.ModelAdmin):
     list_display = ('title', 'active', 'fase', 'reserva_unit', 'rango_preventa', 'rango_tardia',
-                    'tardia_disponibles', 'reservas_count')
+                    'tardia_disponibles', 'entrega_desde', 'entrega_hasta', 'reservas_count')
     list_filter = ('active',)
     search_fields = ('title', 'slug')
     prepopulated_fields = {'slug': ('title',)}
@@ -33,6 +33,8 @@ class PreventaAdmin(admin.ModelAdmin):
         ('General', {'fields': ('title', 'slug', 'description', 'image_url', 'active', 'fase_actual_txt')}),
         ('Reserva y pagos', {'fields': ('reserva_unit', 'breb_key', 'envio_nacional_est')}),
         ('Abonos libres', {'fields': ('permitir_abonos', 'abono_minimo')}),
+        ('Fechas de entrega (juegos físicos)', {'fields': ('entrega_desde', 'entrega_hasta')}),
+        ('Enlace externo (Zelda / GTA VI)', {'fields': ('enlace_externo',), 'classes': ('collapse',)}),
         ('Fase 1 — Preventa', {'fields': ('pre_min', 'pre_max', 'pre_final')}),
         ('Cambio automático', {'fields': ('switch_at',)}),
         ('Fase 2 — Preventa tardía', {'fields': ('tardia_min', 'tardia_max', 'tardia_final', 'tardia_disponibles')}),

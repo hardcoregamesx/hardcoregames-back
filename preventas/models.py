@@ -68,6 +68,17 @@ class Preventa(models.Model):
     )
     abono_minimo = models.IntegerField(default=10000, verbose_name='Abono mínimo (COP)')
 
+    entrega_desde = models.DateField(
+        null=True, blank=True, verbose_name='Entregas desde',
+        help_text='Inicio del rango de entrega del producto físico. Se muestra como "Entregas entre el X y el Z".',
+    )
+    entrega_hasta = models.DateField(null=True, blank=True, verbose_name='Entregas hasta')
+    enlace_externo = models.CharField(
+        max_length=300, blank=True, default='', verbose_name='Enlace externo',
+        help_text='Solo para preventas que se reservan en su propia página (ej. /zelda, /grandtheftautovi). '
+                  'Si lo llenas, la tarjeta en /preventas lleva a ese enlace y no usa el formulario nuevo.',
+    )
+
     pre_min = models.IntegerField(default=0, verbose_name='Preventa: precio mínimo estimado')
     pre_max = models.IntegerField(default=0, verbose_name='Preventa: precio máximo estimado')
     pre_final = models.IntegerField(
@@ -100,6 +111,13 @@ class Preventa(models.Model):
         verbose_name = 'preventa'
         verbose_name_plural = 'Preventas'
         ordering = ['-created_at']
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.entrega_desde and self.entrega_hasta and self.entrega_hasta < self.entrega_desde:
+            raise ValidationError({'entrega_hasta': 'Debe ser igual o posterior a "Entregas desde".'})
+        if self.enlace_externo and not (self.enlace_externo.startswith('/') or self.enlace_externo.startswith('http')):
+            raise ValidationError({'enlace_externo': 'Debe empezar por / (ruta del sitio) o http(s)://.'})
 
     def __str__(self):
         return self.title
