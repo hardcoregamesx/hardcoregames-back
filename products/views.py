@@ -2003,6 +2003,7 @@ def sistecredito_create(request):
             for item in cart_items
         ],
         'couponCode': parsed_transaction.get('couponCode'),
+        'referralCode': parsed_transaction.get('referralCode'),
         'balanceApplied': parsed_transaction.get('balanceApplied'),
         'items_calculados': items_calculados,
         **_facturacion_guardable(parsed_transaction),
