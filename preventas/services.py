@@ -122,6 +122,12 @@ def sync_estado(reserva):
         reserva.estado = ESTADO_PAGADA
         reserva.saldo_paid_at = timezone.now()
         reserva.save(update_fields=['estado', 'saldo_paid_at'])
+        # Referidos: el cashback (1% de TODO lo pagado: reserva + abonos + saldo) se asigna cuando el
+        # comprador termina de pagar el juego. Queda 3 días en espera (ventana de reembolso).
+        if reserva.referral_code:
+            from products import referrals
+            referrals.credit_referral(
+                reserva.referral_code, reserva.user_id, 'preventa', reserva.codigo, abonado_total(reserva))
 
 
 # ----------------------------------------------------------------------- #
@@ -352,10 +358,6 @@ def _aprobar(pago):
     elif pago.tipo in ('SALDO', 'ABONO'):
         # El pago ya quedó 'approved' arriba, así que abonado_total() lo cuenta.
         sync_estado(r)
-    # Referidos: 1% de cada pago aprobado (reserva, abono o saldo) para el dueño del código.
-    if r.referral_code:
-        from products import referrals
-        referrals.credit_referral(r.referral_code, r.user_id, 'preventa', pago.transaction_id, pago.monto)
 
 
 def _vencer(pago):
@@ -390,6 +392,9 @@ def cerrar_reserva(reserva_id, nuevo_estado):
         r.save(update_fields=['estado'])
         if ocupaba_cupo:
             _release_stock(r)
+        if r.referral_code:
+            from products import referrals
+            referrals.revert_referral('preventa', r.codigo)
 
 
 # ----------------------------------------------------------------------- #

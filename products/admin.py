@@ -834,6 +834,10 @@ class SalesDetailAdmin(admin.ModelAdmin):
                 if reponer_stock:
                     GameDetail.objects.filter(pk=combinacion.pk).update(stock=F('stock') + 1)
                 venta.delete()
+                if transaccion is not None and combinacion is not None:
+                    from products import referrals
+                    precio = combinacion.precio_descuento if 0 < combinacion.precio_descuento < combinacion.precio else combinacion.precio
+                    referrals.revert_referral('order', transaccion.id_transaction, base_amount=precio)
             messages.success(
                 request,
                 'Venta cancelada: se quitaron %s puntos y se retiro del panel del cliente%s.'
