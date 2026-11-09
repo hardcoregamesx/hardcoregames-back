@@ -228,6 +228,7 @@ def crear_reserva(preventa, datos):
             ciudad=datos['ciudad'], cedula=datos['cedula'], fuente=datos['fuente'],
             envio_tipo=datos['envio_tipo'], ciudad_intermedia=datos['ciudad_intermedia'],
             user_id=datos.get('user_id'),
+            referral_code=datos.get('referral_code', ''),
             reserva_total=p.reserva_unit * unidades, estado=ESTADO_PENDIENTE,
             expires_at=timezone.now() + timedelta(minutes=RESERVA_MINUTOS),
         )
@@ -351,6 +352,10 @@ def _aprobar(pago):
     elif pago.tipo in ('SALDO', 'ABONO'):
         # El pago ya quedó 'approved' arriba, así que abonado_total() lo cuenta.
         sync_estado(r)
+    # Referidos: 1% de cada pago aprobado (reserva, abono o saldo) para el dueño del código.
+    if r.referral_code:
+        from products import referrals
+        referrals.credit_referral(r.referral_code, r.user_id, 'preventa', pago.transaction_id, pago.monto)
 
 
 def _vencer(pago):

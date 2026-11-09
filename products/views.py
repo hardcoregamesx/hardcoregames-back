@@ -23,7 +23,7 @@ from products.managePriceFile import ManegePricesFile
 from products.models import Products, ShoppingCar, Licenses, Consoles, \
     TypeGames, GameDetail, ProductAccounts, SaleDetail, DaysForRentail, PriceForSuscription, TypeAccounts, \
     VariablesSistema, TypeSuscriptionAccounts, Transactions, Coupon, CouponRedemption
-from products import planes, emails_planes, alegra, alianzas
+from products import planes, emails_planes, alegra, alianzas, referrals
 from products.productSerializers import ProductsSerializer, ProductSerializer, ShoppingCarSerializer, \
     SerializerForTypes, SerializerGameDetail, SerializerForConsole, SerializerSales, SerializerLicencesName, \
     SerializerDaysForRentail, SerializerPriceSuscriptionProduct, SerializerForVariables
@@ -878,6 +878,8 @@ def confirm_sale(request_data, transaction=None):
         order_id = ','.join(str(item['id_combination']) for item in json_request['data'])
         apply_coupon_points(coupon_code, id_user, order_id)
         deduct_balance_exchange(id_user, json_request.get('balanceApplied') or 0)
+        # Referidos: 1% de lo cobrado al dueño del código (mejor esfuerzo, nunca rompe la venta).
+        referrals.credit_for_transaction(json_request.get('referralCode'), id_user, transaction)
 
         if message_html or cuotas_plan_html:
             try:

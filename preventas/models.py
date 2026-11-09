@@ -207,6 +207,10 @@ class Reserva(models.Model):
     )
     despachado_at = models.DateTimeField(null=True, blank=True, verbose_name='Fecha de despacho')
     notas = models.TextField(blank=True, default='', verbose_name='Notas internas')
+    referral_code = models.CharField(
+        max_length=20, blank=True, default='', verbose_name='Código de referido',
+        help_text='Código de referido con el que se reservó; el dueño gana 1% de cada pago aprobado.',
+    )
     expires_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Reserva pagada el')
     saldo_paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Saldo pagado el')

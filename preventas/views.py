@@ -137,6 +137,9 @@ def reservar(request):
     if err:
         return JsonResponse({'error': 'Revisa los datos', 'fields': err}, status=400)
     datos['user_id'] = _jwt_user(request)  # None si reserva como invitado
+    from products import referrals
+    ref = referrals.normalize(data.get('referralCode'))
+    datos['referral_code'] = ref if ref and referrals.code_exists(ref) else ''
     try:
         reserva, pago = services.crear_reserva(p, datos)
     except services.ReservaError as e:
