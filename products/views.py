@@ -965,7 +965,9 @@ def create_sale(sale, id_user, account_selected):
     combination = GameDetail.objects.filter(pk=sale['id_combination']).first()
     today = date.today()
     date_expiration = None
-    if sale['is_rentail']:
+    # 0 dias de alquiler = sin vencimiento (antes quedaba vencida el mismo dia y
+    # SaleDetail desaparecia de 'Compras', que filtra fecha_vencimiento > now()).
+    if sale['is_rentail'] and int(sale['days_rentail'] or 0) > 0:
         date_expiration = today + timedelta(days=int(sale['days_rentail']))
     sale_detail = SaleDetail(
         usuario=user,
