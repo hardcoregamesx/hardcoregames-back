@@ -32,3 +32,8 @@ CREATE INDEX IF NOT EXISTS referral_reward_pending_idx ON referral_reward (avail
 
 -- Código de referido con el que se hizo la reserva de una preventa física.
 ALTER TABLE preventas_reserva ADD COLUMN IF NOT EXISTS referral_code varchar(20) NOT NULL DEFAULT '';
+
+-- El codigo siempre se guarda en minusculas: Fernando11 = FERNANDO11 = fernando11.
+DO $$ BEGIN
+    ALTER TABLE referral_code ADD CONSTRAINT referral_code_lowercase_chk CHECK (code = lower(code));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
