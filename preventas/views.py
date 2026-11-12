@@ -115,6 +115,7 @@ def _validar(data, preventa):
         'nombre': nombre, 'whatsapp': whatsapp, 'direccion': direccion, 'ciudad': ciudad,
         'cedula': cedula, 'fuente': fuente, 'envio_tipo': envio_tipo,
         'ciudad_intermedia': ciudad_int, 'unidades': unidades, 'nombre_pagador': nombre_pagador,
+        'coleccionista': data.get('coleccionista') is True,
     }, None
 
 

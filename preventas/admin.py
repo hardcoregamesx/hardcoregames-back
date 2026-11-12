@@ -76,14 +76,14 @@ def exportar_csv(modeladmin, request, queryset):
     w = csv.writer(resp)
     w.writerow(['Código', 'Preventa', 'Fase', 'Unidades', 'Estado', 'Nombre', 'WhatsApp', 'Cédula', 'Dirección',
                 'Ciudad', 'Envío', 'Ciudad intermedia', 'Total abonado', 'Saldo estimado/pendiente',
-                'Guía / domiciliario', 'Fecha despacho', 'Cómo nos conoció', 'Fecha reserva'])
+                'Guía / domiciliario', 'Fecha despacho', 'Cómo nos conoció', 'Coleccionista', 'Fecha reserva'])
     for r in queryset.select_related('preventa'):
         s = services.saldo_info(r)
         saldo = s['saldo'] if s['definitivo'] else f"{s['saldo_min']}–{s['saldo_max']}"
         w.writerow([r.codigo, r.preventa.title, r.fase, r.unidades, r.estado, r.nombre, r.whatsapp, r.cedula,
                     r.direccion, r.ciudad, r.envio_tipo, r.ciudad_intermedia, s['abonado'],
                     saldo, r.guia, r.despachado_at.strftime('%Y-%m-%d %H:%M') if r.despachado_at else '',
-                    r.fuente, r.created_at.strftime('%Y-%m-%d %H:%M')])
+                    r.fuente, 'SI' if r.coleccionista else '', r.created_at.strftime('%Y-%m-%d %H:%M')])
     return resp
 
 
@@ -104,19 +104,19 @@ def reembolsada(modeladmin, request, queryset):
 @admin.register(Reserva)
 class ReservaAdmin(admin.ModelAdmin):
     list_display = ('codigo', 'preventa', 'fase', 'unidades', 'nombre', 'whatsapp', 'ciudad', 'estado',
-                    'guia', 'despachado_at', 'created_at')
-    list_filter = ('preventa', 'estado', 'fase', 'envio_tipo', 'fuente')
+                    'coleccionista', 'guia', 'despachado_at', 'created_at')
+    list_filter = ('preventa', 'estado', 'fase', 'envio_tipo', 'fuente', 'coleccionista')
     search_fields = ('codigo', 'nombre', 'whatsapp', 'cedula', 'ciudad', 'guia')
     date_hierarchy = 'created_at'
     actions = [exportar_csv, cancelar, reembolsada]
     inlines = [PagoInline]
     readonly_fields = ('codigo', 'user_id', 'preventa', 'fase', 'unidades', 'nombre', 'whatsapp', 'direccion', 'ciudad',
-                       'cedula', 'fuente', 'envio_tipo', 'ciudad_intermedia', 'reserva_total', 'saldo_txt',
+                       'cedula', 'fuente', 'coleccionista', 'envio_tipo', 'ciudad_intermedia', 'reserva_total', 'saldo_txt',
                        'despachado_at', 'expires_at', 'paid_at', 'saldo_paid_at', 'created_at')
     fieldsets = (
         ('Reserva', {'fields': ('codigo', 'preventa', 'fase', 'unidades', 'estado', 'reserva_total', 'saldo_txt',
                                 'paid_at', 'saldo_paid_at', 'created_at')}),
-        ('Cliente', {'fields': ('nombre', 'whatsapp', 'cedula', 'fuente', 'user_id')}),
+        ('Cliente', {'fields': ('nombre', 'whatsapp', 'cedula', 'fuente', 'coleccionista', 'user_id')}),
         ('Envío', {'fields': ('direccion', 'ciudad', 'envio_tipo', 'ciudad_intermedia')}),
         ('Despacho', {'fields': ('guia', 'despachado_at', 'notas'),
                       'description': 'Al llenar la guía, la fecha de despacho se guarda sola y el estado pasa a Despachada.'}),

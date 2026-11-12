@@ -235,6 +235,7 @@ def crear_reserva(preventa, datos):
             envio_tipo=datos['envio_tipo'], ciudad_intermedia=datos['ciudad_intermedia'],
             user_id=datos.get('user_id'),
             referral_code=datos.get('referral_code', ''),
+            coleccionista=bool(datos.get('coleccionista', False)),
             reserva_total=p.reserva_unit * unidades, estado=ESTADO_PENDIENTE,
             expires_at=timezone.now() + timedelta(minutes=RESERVA_MINUTOS),
         )

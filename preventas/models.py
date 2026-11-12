@@ -211,6 +211,10 @@ class Reserva(models.Model):
         max_length=20, blank=True, default='', verbose_name='Código de referido',
         help_text='Código de referido con el que se reservó; el dueño gana 1% de cada pago aprobado.',
     )
+    coleccionista = models.BooleanField(
+        default=False, verbose_name='Interesado en edición coleccionista',
+        help_text='Marcó "Me interesa la versión coleccionista" al reservar.',
+    )
     expires_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Reserva pagada el')
     saldo_paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Saldo pagado el')
