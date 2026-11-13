@@ -335,6 +335,7 @@ class Coupon(models.Model):
         ('CAMPAIGN', 'Campaña'),
         ('ADMIN', 'Administración'),
         ('REFERRAL', 'Referido'),
+        ('PREVENTA', 'Preventa'),
     ]
 
     id_coupon = models.AutoField(primary_key=True)

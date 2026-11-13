@@ -1641,6 +1641,12 @@ def _calculate_cart_amount(parsed_transaction, allow_plans=True):
         if not is_valid:
             return None, None, None, JsonResponse({"error": f"Cupón inválido: {reason}"}, status=400), None, None
 
+        # Reservas/preventas: solo admiten cupón de referido o de preventa.
+        if any(i['modo_pago'] == 'reserva' for i in cart_items) and coupon.source not in ('REFERRAL', 'PREVENTA'):
+            return None, None, None, JsonResponse(
+                {"error": "Cupón inválido: las reservas solo admiten cupones de referido o de preventa."}, status=400
+            ), None, None
+
         def _unit_price(combo_id):
             # El cupón se evalúa sobre el pago de hoy de cada ítem (inicial
             # de cuotas / monto de reserva / precio de contado), no sobre el
