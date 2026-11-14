@@ -141,6 +141,12 @@ def reservar(request):
     from products import referrals
     ref = referrals.normalize(data.get('referralCode'))
     datos['referral_code'] = ref if ref and referrals.code_exists(ref) else ''
+    cupon = str(data.get('couponCode') or '').strip()
+    if cupon:
+        c, cerr = services.validar_cupon(cupon, datos['user_id'])
+        if cerr:
+            return JsonResponse({'error': cerr, 'fields': {'couponCode': cerr}}, status=400)
+        datos['cupon_code'] = c.name_coupon
     try:
         reserva, pago = services.crear_reserva(p, datos)
     except services.ReservaError as e:
@@ -211,6 +217,8 @@ def _reserva_public(r):
             {'transactionId': pg.transaction_id, 'tipo': pg.tipo, 'monto': pg.monto, 'status': pg.status}
             for pg in r.pagos.order_by('-created_at')[:15]
         ],
+        'cupon': ({'codigo': r.cupon_code, 'credito': r.cupon_credito, 'pendiente': not r.cupon_credito}
+                  if r.cupon_code else None),
         'guia': r.guia, 'despachadoAt': r.despachado_at.isoformat() if r.despachado_at else None,
         'expiresAt': r.expires_at.isoformat() if r.expires_at else None,
         'pagoPendiente': services.pago_payload(pago_pend) if pago_pend else None,
@@ -252,6 +260,28 @@ def mis_reservas(request):
         services.sync_estado(r)
         out.append(_reserva_public(r))
     return JsonResponse({'reservas': out})
+
+
+@csrf_exempt
+def aplicar_cupon(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = _body(request)
+    r = _reserva_autorizada(request, data)
+    if not r:
+        return JsonResponse({'error': 'No encontramos una reserva con ese código y cédula'}, status=404)
+    uid = _jwt_user(request)
+    if uid is None:
+        return JsonResponse({'error': 'Inicia sesión para usar tu cupón'}, status=401)
+    if r.user_id != uid:
+        return JsonResponse({'error': 'Esta reserva no es de tu cuenta'}, status=403)
+    try:
+        r = services.aplicar_cupon_existente(r, data.get('couponCode'), uid)
+    except services.ReservaError as e:
+        return JsonResponse({'error': e.message}, status=e.status)
+    r = Reserva.objects.select_related('preventa').get(pk=r.pk)
+    services.sync_estado(r)
+    return JsonResponse({'reserva': _reserva_public(r)})
 
 
 @csrf_exempt

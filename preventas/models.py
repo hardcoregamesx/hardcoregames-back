@@ -215,6 +215,11 @@ class Reserva(models.Model):
         default=False, verbose_name='Interesado en edición coleccionista',
         help_text='Marcó "Me interesa la versión coleccionista" al reservar.',
     )
+    cupon_code = models.CharField(max_length=50, blank=True, default='', verbose_name='Cupón')
+    cupon_credito = models.IntegerField(
+        default=0, verbose_name='Crédito del cupón (COP)',
+        help_text='Se suma a lo abonado (baja el saldo). 0 = cupón aún no acreditado.',
+    )
     expires_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Reserva pagada el')
     saldo_paid_at = models.DateTimeField(null=True, blank=True, verbose_name='Saldo pagado el')

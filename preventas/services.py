@@ -85,6 +85,8 @@ def abonado_total(reserva):
     total = reserva.reserva_total if reserva.paid_at else 0
     for pago in reserva.pagos.filter(status='approved', tipo__in=('ABONO', 'SALDO')):
         total += pago.monto
+    if reserva.paid_at:
+        total += reserva.cupon_credito  # crédito de cupón (cashback): baja el saldo
     return total
 
 
@@ -212,6 +214,77 @@ def _expirar(reserva_id, cancelar_en_vozpay):
             _vozpay('POST', f'/api/expectations/{tx}/cancel', {})
 
 
+# ----------------------------------------------------------------------- #
+#  Cupones de preventa (origen PREVENTA): crédito fijo que baja el saldo     #
+# ----------------------------------------------------------------------- #
+
+def validar_cupon(code, user_id):
+    """Devuelve (coupon, None) o (None, mensaje). Solo cupones con origen PREVENTA,
+    monto fijo, y con sesión (los límites de uso son por cuenta)."""
+    from django.contrib.auth.models import User
+    from products.models import Coupon
+    code = (code or '').strip()
+    if not code:
+        return None, 'Escribe tu cupón'
+    if not user_id:
+        return None, 'Inicia sesión para usar tu cupón'
+    user = User.objects.filter(pk=user_id).first()
+    coupon = Coupon.objects.filter(name_coupon__iexact=code).first()
+    if not user or not coupon or coupon.source != 'PREVENTA':
+        return None, 'Cupón inválido'
+    if not coupon.is_valid:
+        return None, 'El cupón no está activo'
+    if timezone.now() > coupon.expiration_date:
+        return None, 'El cupón ha expirado'
+    if coupon.user_id and coupon.user_id != user.pk:
+        return None, 'Este cupón no es válido para tu cuenta'
+    if coupon.discount_type != 'FIXED_AMOUNT' or coupon.fixed_amount <= 0:
+        return None, 'Cupón inválido'
+    for rule in coupon.rules.filter(rule_type__in=('usage_limit_total', 'usage_limit_per_user')):
+        ok, reason = rule.evaluate(user, 0, [])
+        if not ok:
+            return None, reason
+    return coupon, None
+
+
+def acreditar_cupon(reserva, coupon):
+    """Suma el crédito del cupón a la reserva (ya pagada) y registra el canje. Idempotente."""
+    from products.models import CouponRedemption
+    with db_transaction.atomic():
+        r = Reserva.objects.select_for_update().get(pk=reserva.pk)
+        if r.cupon_credito:
+            return r
+        r.cupon_code = coupon.name_coupon
+        r.cupon_credito = coupon.fixed_amount
+        r.save(update_fields=['cupon_code', 'cupon_credito'])
+        CouponRedemption.objects.create(coupon=coupon, user_id=r.user_id, order_id=f'preventa:{r.codigo}')
+    sync_estado(r)
+    return r
+
+
+def aplicar_cupon_existente(reserva, code, user_id):
+    """Cupón sobre una reserva ya pagada (desde "Consultar reserva")."""
+    if reserva.estado != ESTADO_RESERVADA:
+        raise ReservaError('El cupón se aplica cuando tu reserva ya está pagada y aún tiene saldo', 409)
+    if reserva.cupon_code:
+        raise ReservaError('Esta reserva ya tiene un cupón aplicado', 409)
+    coupon, err = validar_cupon(code, user_id)
+    if err:
+        raise ReservaError(err, 400)
+    return acreditar_cupon(reserva, coupon)
+
+
+def _acreditar_pendiente(r):
+    """Reserva creada con cupón: al confirmarse el pago de la reserva se acredita."""
+    if not r.cupon_code or r.cupon_credito or not r.user_id:
+        return
+    coupon, err = validar_cupon(r.cupon_code, r.user_id)
+    if err:
+        logger.warning('preventas: cupón %s no acreditado en %s: %s', r.cupon_code, r.codigo, err)
+        return
+    acreditar_cupon(r, coupon)
+
+
 def crear_reserva(preventa, datos):
     """`datos` ya validado. Devuelve (reserva, pago)."""
     unidades = datos['unidades']
@@ -235,6 +308,7 @@ def crear_reserva(preventa, datos):
             envio_tipo=datos['envio_tipo'], ciudad_intermedia=datos['ciudad_intermedia'],
             user_id=datos.get('user_id'),
             referral_code=datos.get('referral_code', ''),
+            cupon_code=datos.get('cupon_code', ''),
             coleccionista=bool(datos.get('coleccionista', False)),
             reserva_total=p.reserva_unit * unidades, estado=ESTADO_PENDIENTE,
             expires_at=timezone.now() + timedelta(minutes=RESERVA_MINUTOS),
@@ -356,6 +430,8 @@ def _aprobar(pago):
             r.paid_at = ahora
             r.save(update_fields=['estado', 'paid_at'])
             _take_stock(r)
+        if r.paid_at:
+            _acreditar_pendiente(r)
     elif pago.tipo in ('SALDO', 'ABONO'):
         # El pago ya quedó 'approved' arriba, así que abonado_total() lo cuenta.
         sync_estado(r)

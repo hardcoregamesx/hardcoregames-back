@@ -112,10 +112,10 @@ class ReservaAdmin(admin.ModelAdmin):
     inlines = [PagoInline]
     readonly_fields = ('codigo', 'user_id', 'preventa', 'fase', 'unidades', 'nombre', 'whatsapp', 'direccion', 'ciudad',
                        'cedula', 'fuente', 'coleccionista', 'envio_tipo', 'ciudad_intermedia', 'reserva_total', 'saldo_txt',
-                       'despachado_at', 'expires_at', 'paid_at', 'saldo_paid_at', 'created_at')
+                       'despachado_at', 'expires_at', 'paid_at', 'saldo_paid_at', 'created_at', 'cupon_code', 'cupon_credito')
     fieldsets = (
         ('Reserva', {'fields': ('codigo', 'preventa', 'fase', 'unidades', 'estado', 'reserva_total', 'saldo_txt',
-                                'paid_at', 'saldo_paid_at', 'created_at')}),
+                                'paid_at', 'saldo_paid_at', 'created_at', 'cupon_code', 'cupon_credito')}),
         ('Cliente', {'fields': ('nombre', 'whatsapp', 'cedula', 'fuente', 'coleccionista', 'user_id')}),
         ('Envío', {'fields': ('direccion', 'ciudad', 'envio_tipo', 'ciudad_intermedia')}),
         ('Despacho', {'fields': ('guia', 'despachado_at', 'notas'),
